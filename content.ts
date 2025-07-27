@@ -9,59 +9,91 @@ const snippets: Record<string, string> = {
 }
 
 const createToast = (message: string) => {
-     playNotificationSound()
+  playNotificationSound()
+
+  // --- Main container for positioning ---
   const wrapper = document.createElement("div")
-  wrapper.style.position = "fixed"
-  wrapper.style.top = "30px"
-  wrapper.style.right = "30px"
-  wrapper.style.zIndex = "9999"
-  wrapper.style.pointerEvents = "none"
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    top: "30px",
+    right: "30px",
+    zIndex: "9999",
+    pointerEvents: "none"
+  })
 
+  // --- Toast element ---
   const toast = document.createElement("div")
-  toast.textContent = message
 
+  // --- Professional SVG Icon ---
+  const iconSVG = `
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="#34d399"/>
+    </svg>
+  `
+  // --- Text message element ---
+  const text = document.createElement("span")
+  text.textContent = message
+
+  // --- Dynamic Accent/Timer Bar ---
+  const accentBar = document.createElement("div")
+
+  // Using innerHTML to add the SVG icon and text
+  toast.innerHTML = iconSVG
+  toast.appendChild(text)
+  toast.appendChild(accentBar)
+
+  const toastDuration = 2200 // in ms
+
+  // --- Style the Toast for a creative & professional look ---
   Object.assign(toast.style, {
     position: "relative",
-    padding: "16px 28px",
-    fontSize: "20px",
-    fontWeight: "400",
-    fontFamily: "Segoe UI, sans-serif",
-    color: "#fefefe",
-    background: "rgba(15, 15, 15, 0.4)",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "16px 20px",
+    backgroundColor: "#fff",
+    fontFamily: `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif`,
+    fontSize: "17px",
+    fontWeight: "500",
+    color: "#2d3748",
     borderRadius: "10px",
-    borderTopRightRadius: "0px",
-    backdropFilter: "blur(18px)",
-    border: "1px solid rgba(255, 215, 0, 0.2)",
-    boxShadow:
-      "0 10px 30px rgba(255, 215, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.1)",
-    opacity: "1",
-    transform: "translateY(0)",
+    borderTopRightRadius:"0px",
+    boxShadow: "0 7px 25px rgba(0, 0, 0, 0.08)",
+    border: "1px solid #f0f0f0",
+    overflow: "hidden", // Important for the accent bar's rounded corners
+    opacity: "0", // Start hidden for entry animation
+    transform: "translateX(20px)", // Start off-screen for entry animation
     transition: "opacity 0.4s ease, transform 0.4s ease"
   })
 
-  //Start Emoji
-  const triangle = document.createElement("div")
-  Object.assign(triangle.style, {
+  // --- Style the Accent Bar ---
+  Object.assign(accentBar.style, {
     position: "absolute",
-    top: "-10px",
-    right: "20px",
-    width: "0",
-    height: "0",
-    borderLeft: "10px solid transparent",
-    borderRight: "10px solid transparent",
-    borderBottom: "10px solid rgba(255, 215, 0, 0.2)",
-    filter: "blur(0.5px)"
+    bottom: "0",
+    left: "0",
+    height: "4px",
+    width: "100%",
+    backgroundColor: "#34d399",
+    background: "linear-gradient(90deg, #34d399, #22c55e)", // A professional gradient
+    transition: `width ${toastDuration}ms linear`
   })
 
-  toast.appendChild(triangle)
   wrapper.appendChild(toast)
   document.body.appendChild(wrapper)
 
+  // --- Animate the toast in and start the timer ---
+  setTimeout(() => {
+    toast.style.opacity = "1"
+    toast.style.transform = "translateX(0)"
+    accentBar.style.width = "0%" // Start the timer bar animation
+  }, 10) // Small delay to ensure transition is applied
+
+  // --- Remove the toast after its duration ---
   setTimeout(() => {
     toast.style.opacity = "0"
-    toast.style.transform = "translateY(-10px)"
-    setTimeout(() => wrapper.remove(), 400)
-  }, 2200)
+    toast.style.transform = "translateX(20px)"
+    setTimeout(() => wrapper.remove(), 400) // Wait for exit animation to finish
+  }, toastDuration)
 }
 
 const playNotificationSound = () => {
@@ -69,8 +101,8 @@ const playNotificationSound = () => {
   const oscillator = ctx.createOscillator()
   const gain = ctx.createGain()
 
-  oscillator.type = "sine" // soft and clean
-  oscillator.frequency.setValueAtTime(880, ctx.currentTime) // A5 note
+  oscillator.type = "sine"
+  oscillator.frequency.setValueAtTime(880, ctx.currentTime)
   gain.gain.setValueAtTime(0.001, ctx.currentTime)
   gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + 0.01)
   gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
@@ -79,8 +111,6 @@ const playNotificationSound = () => {
   oscillator.start()
   oscillator.stop(ctx.currentTime + 0.5)
 }
-
-
 
 // Snippet Detection
 document.addEventListener("input", (e) => {
@@ -91,7 +121,7 @@ document.addEventListener("input", (e) => {
   for (const key in snippets) {
     if (target.value.includes(key)) {
       target.value = target.value.replace(key, snippets[key])
-      createToast(`✨ Quick Type inserted ${key}`)
+      createToast(`Quick Type inserted ${key}`) // Cleaner message
     }
   }
 })
