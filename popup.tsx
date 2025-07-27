@@ -1,10 +1,22 @@
-import { LogOut, Plus, Save, Trash2, User } from "lucide-react"
-import React, { useEffect, useState } from "react"
+import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where, type Firestore } from "firebase/firestore";
+import { LogOut, Plus, Save, Trash2, User } from "lucide-react";
+import React, { useEffect, useState } from "react";
 
-import "./style.css"
 
-import { StatefulButton } from "~components/StatefulButton"
-import { useFirebase } from "~firebase/hook"
+
+
+
+
+import "./style.css";
+
+
+
+import { StatefulButton } from "~components/StatefulButton";
+import { useFirebase } from "~firebase/hook";
+
+
+
+
 
 const IndexPopup = () => {
   const [items, setItems] = useState([])
@@ -14,12 +26,16 @@ const IndexPopup = () => {
   const [isEditing, setIsEditing] = useState(false)
   const [deletingItems, setDeletingItems] = useState(new Set())
   const [showLoginAnimation, setShowLoginAnimation] = useState(false)
-  const { user, isLoading, onLogin, onLogout } = useFirebase()
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const { user, isLoading, onLogin, onLogout, firestore } = useFirebase()
 
-  // Load items from storage on component mount
+  // Load items from Firestore when user logs in
   useEffect(() => {
-    loadItems()
-  }, [])
+    if (user && firestore) {
+      loadItems()
+    }
+  }, [user, firestore])
 
   // Show login animation when user logs in
   useEffect(() => {
@@ -30,43 +46,89 @@ const IndexPopup = () => {
   }, [user, isLoading])
 
   const loadItems = async () => {
+    if (!user || !firestore) return
+
+    setLoading(true)
     try {
-      const stored = localStorage.getItem("extension-items")
-      if (stored) {
-        const parsedItems = JSON.parse(stored)
-        setItems(parsedItems)
-      } else {
-        const defaultItems = [
-          { id: "1", keyword: "/email", value: "john.doe@company.com" },
-          { id: "2", keyword: "/phone", value: "+1 (555) 123-4567" },
-          {
-            id: "3",
-            keyword: "/address",
-            value: "123 Main St, City, State 12345"
-          }
-        ]
-        setItems(defaultItems)
-        localStorage.setItem("extension-items", JSON.stringify(defaultItems))
+      const itemsCollection = collection(
+        firestore,
+        `quickTypeItems/${user.uid}/items`
+      )
+
+      const q = query(
+        itemsCollection,
+        where("userId", "==", user.uid),
+        orderBy("createdAt", "desc")
+      )
+      const querySnapshot = await getDocs(q)
+
+      const loadedItems = []
+      querySnapshot.forEach((doc) => {
+        loadedItems.push({
+          id: doc.id,
+          ...doc.data()
+        })
+      })
+
+      setItems(loadedItems)
+
+      // If no items exist, create default ones
+      if (loadedItems.length === 0) {
+        await createDefaultItems()
       }
     } catch (error) {
       console.error("Error loading items:", error)
+      alert("Error loading your items. Please try again."+ error.message || "UNKNOWN")
+    } finally {
+      setLoading(false)
     }
   }
 
-  const saveItems = async (updatedItems) => {
+  const createDefaultItems = async () => {
+    if (!user || !firestore) return
+
+    const defaultItems = [
+      { keyword: "/email", value: "john.doe@company.com" },
+      { keyword: "/phone", value: "+1 (555) 123-4567" },
+      { keyword: "/address", value: "123 Main St, City, State 12345" }
+    ]
+
     try {
-      localStorage.setItem("extension-items", JSON.stringify(updatedItems))
-      setItems(updatedItems)
+      const itemsCollection = collection(
+        firestore,
+        `quickTypeItems/${user.uid}/items`
+      )
+      const createdItems = []
+
+      for (const item of defaultItems) {
+        const docRef = await addDoc(itemsCollection, {
+          ...item,
+          userId: user.uid,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+
+        createdItems.push({
+          id: docRef.id,
+          ...item,
+          userId: user.uid,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+      }
+
+      setItems(createdItems)
     } catch (error) {
-      console.error("Error saving items:", error)
+      console.error("Error creating default items:", error)
     }
   }
 
   const addNewItem = () => {
     const newItem = {
-      id: Date.now().toString(),
+      id: null, // Will be set when saved to Firestore
       keyword: "/",
-      value: ""
+      value: "",
+      userId: user.uid
     }
     setSelectedItem(newItem)
     setKeyword("/")
@@ -89,6 +151,8 @@ const IndexPopup = () => {
   }
 
   const saveCurrentItem = async () => {
+    if (!user || !firestore) return
+
     const trimmedKeyword = keyword.trim()
     const trimmedValue = value.trim()
 
@@ -102,8 +166,9 @@ const IndexPopup = () => {
       return
     }
 
+    // Check for duplicate keyword (excluding current item)
     const existingKeywordItem = items.find(
-      (item) => item.keyword === trimmedKeyword && item.id !== selectedItem.id
+      (item) => item.keyword === trimmedKeyword && item.id !== selectedItem?.id
     )
     if (existingKeywordItem) {
       alert(
@@ -112,8 +177,9 @@ const IndexPopup = () => {
       return
     }
 
+    // Check for duplicate value (excluding current item)
     const existingValueItem = items.find(
-      (item) => item.value === trimmedValue && item.id !== selectedItem.id
+      (item) => item.value === trimmedValue && item.id !== selectedItem?.id
     )
     if (existingValueItem) {
       alert(
@@ -122,47 +188,95 @@ const IndexPopup = () => {
       return
     }
 
-    const updatedItem = {
-      ...selectedItem,
-      keyword: trimmedKeyword,
-      value: trimmedValue
-    }
+    setSaving(true)
+    try {
+      const itemData = {
+        keyword: trimmedKeyword,
+        value: trimmedValue,
+        userId: user.uid,
+        updatedAt: new Date()
+      }
 
-    let updatedItems
-    if (isEditing) {
-      updatedItems = [...items, updatedItem]
-    } else {
-      updatedItems = items.map((item) =>
-        item.id === selectedItem.id ? updatedItem : item
-      )
-    }
+      if (isEditing) {
+        // Create new item
+        const itemsCollection = collection(
+          firestore,
+          `quickTypeItems/${user.uid}/items`
+        )
+        const docRef = await addDoc(itemsCollection, {
+          ...itemData,
+          createdAt: new Date()
+        })
 
-    await saveItems(updatedItems)
-    setSelectedItem(updatedItem)
-    setIsEditing(false)
+        const newItem = {
+          id: docRef.id,
+          ...itemData,
+          createdAt: new Date()
+        }
+
+        setItems((prevItems) => [newItem, ...prevItems])
+        setSelectedItem(newItem)
+      } else {
+        // Update existing item
+        const itemDoc = doc(firestore, "quickTypeItems", selectedItem.id)
+        await updateDoc(itemDoc, itemData)
+
+        const updatedItem = {
+          ...selectedItem,
+          ...itemData
+        }
+
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.id === selectedItem.id ? updatedItem : item
+          )
+        )
+        setSelectedItem(updatedItem)
+      }
+
+      setIsEditing(false)
+    } catch (error) {
+      console.error("Error saving item:", error)
+      alert("Error saving item. Please try again.")
+    } finally {
+      setSaving(false)
+    }
   }
 
   const deleteItem = async (itemToDelete) => {
+    if (!user || !firestore) return
+
     // Add to deleting set for animation
     setDeletingItems((prev) => new Set(prev).add(itemToDelete.id))
 
     // Wait for animation
     setTimeout(async () => {
-      const updatedItems = items.filter((item) => item.id !== itemToDelete.id)
-      await saveItems(updatedItems)
+      try {
+        // Delete from Firestore
+        const itemDoc = doc(firestore, "quickTypeItems", itemToDelete.id)
+        await deleteDoc(itemDoc)
 
-      if (selectedItem && selectedItem.id === itemToDelete.id) {
-        setSelectedItem(null)
-        setKeyword("/")
-        setValue("")
+        // Update local state
+        setItems((prevItems) =>
+          prevItems.filter((item) => item.id !== itemToDelete.id)
+        )
+
+        if (selectedItem && selectedItem.id === itemToDelete.id) {
+          setSelectedItem(null)
+          setKeyword("/")
+          setValue("")
+        }
+      } catch (error) {
+        console.error("Error deleting item:", error)
+        alert("Error deleting item. Please try again.")
+      } finally {
+        // Remove from deleting set
+        setDeletingItems((prev) => {
+          const newSet = new Set(prev)
+          newSet.delete(itemToDelete.id)
+          return newSet
+        })
       }
-
-      // Remove from deleting set
-      setDeletingItems((prev) => {
-        const newSet = new Set(prev)
-        newSet.delete(itemToDelete.id)
-        return newSet
-      })
     }, 300)
   }
 
@@ -234,7 +348,8 @@ const IndexPopup = () => {
             <h2 className="text-lg font-semibold text-gray-800">Quick Items</h2>
             <button
               onClick={addNewItem}
-              className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-md">
+              disabled={loading}
+              className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
               <Plus
                 size={16}
                 className="group-hover:rotate-90 transition-transform duration-200"
@@ -245,7 +360,12 @@ const IndexPopup = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {items.length === 0 ? (
+          {loading ? (
+            <div className="p-6 text-center">
+              <div className="w-8 h-8 mx-auto border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-gray-500">Loading your shortcuts...</p>
+            </div>
+          ) : items.length === 0 ? (
             <div className="p-6 text-center animate-fade-in">
               <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
                 <Plus size={24} className="text-gray-400" />
@@ -305,12 +425,24 @@ const IndexPopup = () => {
                 <h1 className="text-2xl font-bold text-gray-800">
                   {isEditing ? "Create New Item" : "Edit Item"}
                 </h1>
-                {value && (<StatefulButton
-                  onClick={saveCurrentItem}
-                  className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 hover:scale-105 hover:shadow-md">
-                  
-                  Save Changes
-                </StatefulButton>)}
+                {value && (
+                  <StatefulButton
+                    onClick={saveCurrentItem}
+                    disabled={saving}
+                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                    {saving ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        
+                        Save Changes
+                      </>
+                    )}
+                  </StatefulButton>
+                )}
               </div>
             </div>
 
@@ -328,7 +460,8 @@ const IndexPopup = () => {
                       value={keyword}
                       onChange={handleKeywordChange}
                       placeholder="/email"
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-lg font-mono"
+                      disabled={saving}
+                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-lg font-mono disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-5"></div>
                   </div>
@@ -350,7 +483,8 @@ const IndexPopup = () => {
                       onChange={(e) => setValue(e.target.value)}
                       placeholder="Enter the text that will replace your keyword..."
                       rows={8}
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none"
+                      disabled={saving}
+                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-5"></div>
                   </div>
@@ -359,7 +493,6 @@ const IndexPopup = () => {
                     This text will be inserted when you use the keyword
                   </p>
                 </div>
-
               </div>
             </div>
           </div>
