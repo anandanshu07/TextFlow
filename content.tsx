@@ -17,10 +17,16 @@ const QuickTypeContent = () => {
   const [isInitialized, setIsInitialized] = useState(false)
   const [user, setUser] = useState(null)
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>({})
+  const usageCountsRef = useRef<Record<string, number>>({}) // Immediate reference for usage counts
   const inputTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<MutationObserver | null>(null)
   const focusedElementRef = useRef<HTMLElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+
+  // Sync usageCountsRef with usageCounts state
+  useEffect(() => {
+    usageCountsRef.current = usageCounts
+  }, [usageCounts])
 
   // Load snippets from background script
   const loadSnippetsFromBackground = async () => {
@@ -43,6 +49,7 @@ const QuickTypeContent = () => {
             usageData[item.keyword] = item.usageCount || 0
           })
           setUsageCounts(usageData)
+          usageCountsRef.current = usageData // Also update ref
           log("📊 Usage counts loaded:", usageData)
         }
       } else {
@@ -86,6 +93,7 @@ const QuickTypeContent = () => {
               usageData[item.keyword] = item.usageCount || 0
             })
             setUsageCounts(usageData)
+            usageCountsRef.current = usageData // Also update ref
             log("📊 Initial usage counts loaded:", usageData)
           }
         }
@@ -124,6 +132,7 @@ const QuickTypeContent = () => {
                 usageData[item.keyword] = item.usageCount || 0
               })
               setUsageCounts(usageData)
+              usageCountsRef.current = usageData // Also update ref
               log("📊 Login usage counts loaded:", usageData)
             }
           }
@@ -154,6 +163,7 @@ const QuickTypeContent = () => {
               usageData[item.keyword] = item.usageCount || 0
             })
             setUsageCounts(usageData)
+            usageCountsRef.current = usageData // Also update ref
             log("📊 Usage counts updated:", usageData)
           }
           break
@@ -161,10 +171,18 @@ const QuickTypeContent = () => {
         case "USAGE_UPDATED":
           log("📈 Usage updated message received:", message)
           // Update local usage counts for toast display
-          setUsageCounts((prev) => ({
-            ...prev,
-            [message.keyword]: message.usageCount
-          }))
+          // Only update if the received count is higher than our current count (avoid overwriting optimistic updates)
+          setUsageCounts((prev) => {
+            const newCounts = {
+              ...prev,
+              [message.keyword]: Math.max(
+                prev[message.keyword] || 0,
+                message.usageCount
+              )
+            }
+            usageCountsRef.current = newCounts // Also update ref
+            return newCounts
+          })
           log(`📊 Usage count for ${message.keyword}: ${message.usageCount}`)
           break
 
@@ -257,6 +275,8 @@ const QuickTypeContent = () => {
 
   // Dark UI themed toast notification system
   const createToast = (message: string, usageCount?: number) => {
+    log(`🍞 Creating toast - Message: "${message}", Usage Count: ${usageCount}`)
+
     // Remove existing toast if present
     const existingToast = document.querySelector(".quicktype-toast-wrapper")
     if (existingToast) {
@@ -338,7 +358,7 @@ const QuickTypeContent = () => {
 
     // Usage count badge (always show)
     const usageBadge = document.createElement("div")
-    const timesUsed = (usageCount || 0) + 1
+    const timesUsed = usageCount || 1 // Use the passed count directly, default to 1 for first use
     usageBadge.innerHTML = `
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" style="margin-right: 4px; display: inline-block; vertical-align: middle;">
         <path d="M3 3v18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -551,10 +571,35 @@ const QuickTypeContent = () => {
           replacement.length > 30
             ? replacement.substring(0, 30) + "..."
             : replacement
-        const currentUsage = usageCounts[keyword] || 0
-        createToast(`${keyword} → ${displayText}`, currentUsage)
 
-        // Increment usage count for all replaced keywords
+        // Calculate the new usage count using the ref for immediate access
+        const currentUsage = usageCountsRef.current[keyword] || 0
+        const newUsageCount = currentUsage + 1
+
+        log(
+          `🔍 Toast Debug - Keyword: ${keyword}, Current: ${currentUsage}, New: ${newUsageCount}`
+        )
+
+        // Immediately update both ref and state for all replaced keywords
+        const updatedCounts: Record<string, number> = {}
+        replacedKeywords.forEach((replacedKeyword) => {
+          const currentUsage = usageCountsRef.current[replacedKeyword] || 0
+          const newCount = currentUsage + 1
+          updatedCounts[replacedKeyword] = newCount
+          // Update ref immediately
+          usageCountsRef.current[replacedKeyword] = newCount
+        })
+
+        // Update state for UI consistency
+        setUsageCounts((prev) => ({
+          ...prev,
+          ...updatedCounts
+        }))
+
+        // Show toast with the new count
+        createToast(`${keyword} → ${displayText}`, newUsageCount)
+
+        // Increment usage count for all replaced keywords in background
         replacedKeywords.forEach((replacedKeyword) => {
           incrementUsageCount(replacedKeyword)
         })
@@ -654,10 +699,35 @@ const QuickTypeContent = () => {
           replacement.length > 30
             ? replacement.substring(0, 30) + "..."
             : replacement
-        const currentUsage = usageCounts[keyword] || 0
-        createToast(`${keyword} → ${displayText}`, currentUsage)
 
-        // Increment usage count for all replaced keywords
+        // Calculate the new usage count using the ref for immediate access
+        const currentUsage = usageCountsRef.current[keyword] || 0
+        const newUsageCount = currentUsage + 1
+
+        log(
+          `🔍 Contenteditable Toast Debug - Keyword: ${keyword}, Current: ${currentUsage}, New: ${newUsageCount}`
+        )
+
+        // Immediately update both ref and state for all replaced keywords
+        const updatedCounts: Record<string, number> = {}
+        replacedKeywords.forEach((replacedKeyword) => {
+          const currentUsage = usageCountsRef.current[replacedKeyword] || 0
+          const newCount = currentUsage + 1
+          updatedCounts[replacedKeyword] = newCount
+          // Update ref immediately
+          usageCountsRef.current[replacedKeyword] = newCount
+        })
+
+        // Update state for UI consistency
+        setUsageCounts((prev) => ({
+          ...prev,
+          ...updatedCounts
+        }))
+
+        // Show toast with the new count
+        createToast(`${keyword} → ${displayText}`, newUsageCount)
+
+        // Increment usage count for all replaced keywords in background
         replacedKeywords.forEach((replacedKeyword) => {
           incrementUsageCount(replacedKeyword)
         })
@@ -910,6 +980,7 @@ const QuickTypeContent = () => {
         snippetsCount: Object.keys(snippets).length,
         snippets: snippets,
         usageCounts: usageCounts,
+        usageCountsRef: usageCountsRef.current,
         focusedElement: focusedElementRef.current?.tagName || null,
         audioContext: audioContextRef.current?.state || "Not initialized",
         totalInputsOnPage: document.querySelectorAll(
