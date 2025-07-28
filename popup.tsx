@@ -126,10 +126,7 @@ const IndexPopup = () => {
         )
         setItems(itemsFromSnippets)
 
-        // If no items exist, create default ones
-        if (itemsFromSnippets.length === 0) {
-          await createDefaultItems()
-        }
+        
       }
     } catch (error) {
       console.error("Error loading items:", error)
@@ -139,31 +136,7 @@ const IndexPopup = () => {
     }
   }
 
-  const createDefaultItems = async () => {
-    if (!user) return
-
-    const defaultItems = [
-      { keyword: "/email", value: "john.doe@company.com" },
-      { keyword: "/phone", value: "+1 (555) 123-4567" },
-      { keyword: "/address", value: "123 Main St, City, State 12345" }
-    ]
-
-    try {
-      // For now, we'll just set these as local items since we don't have direct Firebase access
-      // In a real implementation, you'd send these to the background script to save to Firebase
-      const createdItems = defaultItems.map((item, index) => ({
-        id: `default-${index}`,
-        ...item,
-        userId: user.uid,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }))
-
-      setItems(createdItems)
-    } catch (error) {
-      console.error("Error creating default items:", error)
-    }
-  }
+  
 
   const addNewItem = () => {
     const newItem = {
@@ -430,8 +403,9 @@ const IndexPopup = () => {
                 <br />
               </h1>
               <p className="text-[#b6b9be]/70 text-lg font-figtree">
-                
-                Turn your frequently typed phrases, emails, and links into simple slash (/) shortcuts. Save time and reduce errors with every keystroke.
+                Turn your frequently typed phrases, emails, and links into
+                simple slash (/) shortcuts. Save time and reduce errors with
+                every keystroke.
               </p>
             </div>
 
@@ -466,7 +440,8 @@ const IndexPopup = () => {
 
             {/* Subtle subtitle */}
             <p className="text-[#b6b9be]/50 text-sm font-figtree">
-              Your shortcuts are 🔒 end-to-end encrypted. <br/> Yes! we cannot see any data.
+              Your shortcuts are 🔒 end-to-end encrypted. <br /> Yes! we cannot
+              see any data.
             </p>
           </div>
         </div>
@@ -476,36 +451,57 @@ const IndexPopup = () => {
 
   return (
     <div
-      className={`flex h-[550px] w-[750px] bg-gray-50 ${showLoginAnimation ? "animate-slide-in" : ""}`}>
+      className={`flex h-[550px] w-[750px] bg-[#0a0a0f] relative overflow-hidden ${showLoginAnimation ? "animate-slide-in" : ""}`}>
+      {/* Light Rays Effect for logged in state */}
+      <LightRays
+        raysOrigin="top-left"
+        raysColor="#b6b9be"
+        raysSpeed={0.5}
+        lightSpread={0.8}
+        rayLength={1.8}
+        pulsating={true}
+        fadeDistance={2.0}
+        saturation={0.4}
+        followMouse={false}
+        mouseInfluence={0.05}
+        noiseAmount={0.08}
+        distortion={0.03}
+        className="absolute inset-0 h-full w-full opacity-30"
+      />
+
       {/* User Header */}
-      <div className="absolute top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-10">
+      <div className="absolute top-0 left-0 right-0 h-16 bg-[#0a0a0f]/90 backdrop-blur-sm border-b border-[#b6b9be]/10 flex items-center justify-between px-6 z-20">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-            <User size={16} className="text-white" />
+          <div className="w-8 h-8 bg-gradient-to-r from-[#b6b9be] to-[#9ca3af] rounded-full flex items-center justify-center shadow-lg shadow-[#b6b9be]/20">
+            <User size={16} className="text-[#0a0a0f]" />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-800">
+            <p className="text-sm font-medium text-[#b6b9be] font-figtree">
               {user.displayName}
             </p>
-            <p className="text-xs text-gray-500">{user.email}</p>
+            <p className="text-xs text-[#b6b9be]/60 font-figtree">
+              {user.email}
+            </p>
           </div>
         </div>
         <button
           onClick={onLogout}
-          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200">
+          className="p-2 text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10 rounded-lg transition-all duration-200 backdrop-blur-sm">
           <LogOut size={16} />
         </button>
       </div>
 
       {/* Left Sidebar */}
-      <div className="w-80 bg-white border-r border-gray-200 flex flex-col mt-16">
-        <div className="p-4 border-b border-gray-200">
+      <div className="w-80 bg-[#0a0a0f]/40 backdrop-blur-md border-r border-[#b6b9be]/10 flex flex-col mt-16 relative z-10">
+        <div className="p-4 border-b border-[#b6b9be]/10">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">Quick Items</h2>
+            <h2 className="text-lg font-semibold text-[#b6b9be] font-figtree">
+              Quick Items
+            </h2>
             <button
               onClick={addNewItem}
               disabled={loading}
-              className="group flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+              className="group flex items-center gap-2 px-4 py-2 bg-[#b6b9be] text-[#0a0a0f] rounded-xl hover:bg-[#9ca3af] transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-[#b6b9be]/20 disabled:opacity-50 disabled:cursor-not-allowed font-figtree font-medium">
               <Plus
                 size={16}
                 className="group-hover:rotate-90 transition-transform duration-200"
@@ -518,16 +514,22 @@ const IndexPopup = () => {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-6 text-center">
-              <div className="w-8 h-8 mx-auto border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="text-gray-500">Loading your shortcuts...</p>
+              <div className="w-8 h-8 mx-auto border-2 border-[#b6b9be] border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-[#b6b9be]/70 font-figtree">
+                Loading your shortcuts...
+              </p>
             </div>
           ) : items.length === 0 ? (
             <div className="p-6 text-center animate-fade-in">
-              <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                <Plus size={24} className="text-gray-400" />
+              <div onClick={addNewItem}
+                  
+                  className="w-16 h-16 mx-auto bg-[#b6b9be]/10 rounded-full flex items-center justify-center mb-4 backdrop-blur-sm">
+                <Plus size={24} className="text-[#b6b9be]/60" />
               </div>
-              <p className="text-gray-500 mb-2">No items yet</p>
-              <p className="text-sm text-gray-400">
+              <p className="text-[#b6b9be]/70 mb-2 font-figtree">
+                No items yet
+              </p>
+              <p className="text-sm text-[#b6b9be]/50 font-figtree">
                 Click "Add New" to create your first shortcut
               </p>
             </div>
@@ -537,11 +539,11 @@ const IndexPopup = () => {
                 <div
                   key={item.id}
                   className={`
-                    group p-3 rounded-xl cursor-pointer transition-all duration-300 border
+                    group p-3 rounded-xl cursor-pointer transition-all duration-300 border backdrop-blur-sm
                     ${
                       selectedItem && selectedItem.id === item.id
-                        ? "bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 shadow-sm"
-                        : "bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-200 hover:shadow-sm"
+                        ? "bg-[#b6b9be]/20 border-[#b6b9be]/30  shadow-[#b6b9be]/10"
+                        : "bg-[#b6b9be]/5 border-[#b6b9be]/10 hover:bg-[#b6b9be]/10 hover:border-[#b6b9be]/20  hover:shadow-[#b6b9be]/5"
                     }
                     ${deletingItems.has(item.id) ? "animate-slide-out-left opacity-0 transform -translate-x-full" : "animate-slide-in-item"}
                   `}
@@ -549,10 +551,10 @@ const IndexPopup = () => {
                   onClick={() => selectItem(item)}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 truncate mb-1">
+                      <div className="font-medium text-[#b6b9be] truncate mb-1 font-figtree">
                         {item.keyword || "Untitled"}
                       </div>
-                      <div className="text-sm text-gray-500 truncate">
+                      <div className="text-sm text-[#b6b9be]/60 truncate font-figtree">
                         {item.value || "No value"}
                       </div>
                     </div>
@@ -561,7 +563,7 @@ const IndexPopup = () => {
                         e.stopPropagation()
                         deleteItem(item)
                       }}
-                      className="ml-3 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100 hover:scale-110">
+                      className="ml-3 p-2 text-[#b6b9be]/40 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100 hover:scale-110">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -573,22 +575,22 @@ const IndexPopup = () => {
       </div>
 
       {/* Right Panel */}
-      <div className="flex-1 flex flex-col mt-16">
+      <div className="flex-1 flex flex-col mt-16 relative z-10">
         {selectedItem ? (
           <div className="flex-1 flex flex-col animate-fade-in">
-            <div className="p-6 border-b border-gray-200 bg-white">
+            <div className="p-6 border-b border-[#b6b9be]/10 bg-[#0a0a0f]/40 backdrop-blur-md">
               <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-gray-800">
+                <h1 className="text-2xl font-bold text-[#b6b9be] font-figtree">
                   {isEditing ? "Create New Item" : "Edit Item"}
                 </h1>
                 {value && (
                   <StatefulButton
                     onClick={saveCurrentItem}
                     disabled={saving}
-                    className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white font-medium rounded-lg hover:from-green-600 hover:to-green-700 transition-all duration-200 hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
+                    className="flex items-center gap-2 px-6 py-2 bg-[#b6b9be] text-[#0a0a0f] font-medium rounded-xl hover:bg-[#9ca3af] transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-[#b6b9be]/20 disabled:opacity-50 disabled:cursor-not-allowed font-figtree">
                     {saving ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-4 h-4 border-2 border-[#0a0a0f] border-t-transparent rounded-full animate-spin"></div>
                         Saving...
                       </>
                     ) : (
@@ -599,12 +601,12 @@ const IndexPopup = () => {
               </div>
             </div>
 
-            <div className="flex-1 p-6 bg-gray-50 overflow-y-auto">
+            <div className="flex-1 p-6 bg-[#0a0a0f]/20 backdrop-blur-sm overflow-y-auto">
               <div className="max-w-2xl space-y-6">
                 <div
                   className="animate-slide-up"
                   style={{ animationDelay: "100ms" }}>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
                     Trigger Keyword
                   </label>
                   <div className="relative">
@@ -614,12 +616,12 @@ const IndexPopup = () => {
                       onChange={handleKeywordChange}
                       placeholder="/email"
                       disabled={saving}
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-lg font-mono disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 text-lg font-mono text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
-                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-5"></div>
+                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-2 flex items-center gap-1">
-                    <span className="w-1 h-1 bg-blue-500 rounded-full"></span>
+                  <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
+                    <span className="w-1 h-1 bg-[#b6b9be] rounded-full"></span>
                     Type this keyword to trigger the shortcut
                   </p>
                 </div>
@@ -627,7 +629,7 @@ const IndexPopup = () => {
                 <div
                   className="animate-slide-up"
                   style={{ animationDelay: "200ms" }}>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
                     Replacement Text
                   </label>
                   <div className="relative">
@@ -637,12 +639,12 @@ const IndexPopup = () => {
                       placeholder="Enter the text that will replace your keyword..."
                       rows={8}
                       disabled={saving}
-                      className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 resize-none text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed font-figtree"
                     />
-                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-5"></div>
+                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
                   </div>
-                  <p className="text-sm text-gray-500 mt-2 flex items-center gap-1">
-                    <span className="w-1 h-1 bg-green-500 rounded-full"></span>
+                  <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
+                    <span className="w-1 h-1 bg-green-400 rounded-full"></span>
                     This text will be inserted when you use the keyword
                   </p>
                 </div>
@@ -650,15 +652,15 @@ const IndexPopup = () => {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="flex-1 flex items-center justify-center bg-[#0a0a0f]/20 backdrop-blur-sm">
             <div className="text-center animate-fade-in">
-              <div className="w-24 h-24 mx-auto bg-gradient-to-r from-gray-100 to-gray-200 rounded-full flex items-center justify-center mb-6 animate-pulse-slow">
-                <Plus size={32} className="text-gray-400" />
+              <div onClick={addNewItem}  className="w-24 h-24 mx-auto bg-gradient-to-r from-[#b6b9be]/20 to-[#9ca3af]/20 rounded-full flex items-center justify-center mb-6 animate-pulse-slow backdrop-blur-sm shadow-lg shadow-[#b6b9be]/10">
+                <Plus size={32} className="text-[#b6b9be]/60" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-600 mb-2">
+              <h3 className="text-xl font-semibold text-[#b6b9be] mb-2 font-figtree">
                 Ready to create shortcuts?
               </h3>
-              <p className="text-gray-500 max-w-sm">
+              <p className="text-[#b6b9be]/60 max-w-sm font-figtree">
                 Select an item from the sidebar to edit, or create a new
                 shortcut to get started
               </p>
