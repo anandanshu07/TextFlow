@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client"
 
 // Global state for snippets
 let globalSnippets: Record<string, string> = {
-  "/email": "Please Login Quick Type Chrome Extension",
+  "/email": "Please Login Quick Type Chrome Extension"
 }
 
 // Enhanced logging function
@@ -19,6 +19,7 @@ const QuickTypeContent = () => {
   const inputTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<MutationObserver | null>(null)
   const focusedElementRef = useRef<HTMLElement | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
 
   // Load snippets from background script
   const loadSnippetsFromBackground = async () => {
@@ -121,116 +122,212 @@ const QuickTypeContent = () => {
     }
   }, [])
 
-  // Toast notification system
+  // Initialize Audio Context on first user interaction
+  const initializeAudioContext = () => {
+    if (!audioContextRef.current) {
+      try {
+        audioContextRef.current = new (window.AudioContext ||
+          (window as any).webkitAudioContext)()
+        log("🔊 Audio context initialized")
+      } catch (error) {
+        log("❌ Failed to initialize audio context:", error)
+      }
+    }
+  }
+
+  // Enhanced click-like notification sound
+  // Notification pop sound
+  // Notification pop sound - Bolder and Louder
+  const playNotificationSound = async () => {
+    try {
+      initializeAudioContext();
+
+      if (!audioContextRef.current) {
+        log("🔇 Audio context not available");
+        return;
+      }
+
+      if (audioContextRef.current.state === "suspended") {
+        await audioContextRef.current.resume();
+      }
+
+      const ctx = audioContextRef.current;
+      const now = ctx.currentTime;
+      const volume = 0.35; // Increased volume
+
+      // 1. Create the Main Sound Source (Triangle Wave)
+      // A triangle wave sounds richer and less sharp than a sine wave.
+      const mainOscillator = ctx.createOscillator();
+      mainOscillator.type = "triangle";
+      // Lowered frequency to 650Hz to make it less shrill.
+      mainOscillator.frequency.setValueAtTime(650, now);
+
+      // 2. Create a Bass Layer for "Body" (Sine Wave)
+      // This adds a low-end "thump" to make the pop feel more bold.
+      const bassOscillator = ctx.createOscillator();
+      bassOscillator.type = "sine";
+      bassOscillator.frequency.setValueAtTime(120, now);
+
+      // 3. Create the Volume Envelope (GainNode)
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
+      // Slightly longer decay for a fuller sound.
+      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+      // 4. Connect everything and play
+      // Both oscillators connect to the same gain node.
+      mainOscillator.connect(gainNode);
+      bassOscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      mainOscillator.start(now);
+      bassOscillator.start(now);
+      mainOscillator.stop(now + 0.1);
+      bassOscillator.stop(now + 0.1);
+
+      log("🔊 Bolder pop notification sound played");
+    } catch (error) {
+      log("🔇 Audio playback failed:", error);
+    }
+  };
+
+  // Dark UI themed toast notification system
   const createToast = (message: string) => {
-    if (document.querySelector(".quicktype-toast")) {
-      return
+    // Remove existing toast if present
+    const existingToast = document.querySelector(".quicktype-toast-wrapper")
+    if (existingToast) {
+      existingToast.remove()
     }
 
-    try {
-      playNotificationSound()
-    } catch (error) {
-      log("🔇 Audio unavailable:", error)
-    }
+    // Play sound first
+    playNotificationSound()
 
     const wrapper = document.createElement("div")
-    wrapper.className = "quicktype-toast"
+    wrapper.className = "quicktype-toast-wrapper"
+
+    // Enhanced positioning matching your dark UI theme
     Object.assign(wrapper.style, {
       position: "fixed",
-      top: "30px",
-      right: "30px",
-      zIndex: "999999",
-      pointerEvents: "none"
+      top: "20px",
+      right: "20px",
+      zIndex: "2147483647", // Maximum z-index value
+      pointerEvents: "none",
+      fontFamily:
+        "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif, 'figtree'"
     })
 
     const toast = document.createElement("div")
-    const iconSVG = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink: 0;">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="#10b981"/>
-      </svg>
-    `
 
-    const text = document.createElement("span")
-    text.textContent = message
-    text.style.fontSize = "14px"
-
-    const accentBar = document.createElement("div")
-
-    toast.innerHTML = iconSVG
-    toast.appendChild(text)
-    toast.appendChild(accentBar)
-
-    const toastDuration = 2000
-
+    // Dark theme styling to match your login UI
     Object.assign(toast.style, {
-      position: "relative",
       display: "flex",
       alignItems: "center",
-      gap: "10px",
-      padding: "12px 16px",
-      backgroundColor: "#fff",
-      fontFamily: "system-ui, -apple-system, sans-serif",
+      gap: "12px",
+      padding: "16px 20px",
+      backgroundColor: "#0a0a0f", // Same as your login background
+      color: "#b6b9be", // Same as your login text color
+      borderRadius: "10px",
+      borderTopRightRadius: "0px",
+      boxShadow:
+        "0 20px 25px -5px rgba(182, 185, 190, 0.1), 0 10px 10px -5px rgba(182, 185, 190, 0.04), 0 0 0 1px rgba(182, 185, 190, 0.1)",
+      border: "1px solid rgba(182, 185, 190, 0.1)", // Subtle border using your theme color
+      backdropFilter: "blur(12px)",
       fontSize: "14px",
       fontWeight: "500",
-      color: "#374151",
-      borderRadius: "8px",
-      borderTopRightRadius: "0px",
-      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-      border: "1px solid #e5e7eb",
-      overflow: "hidden",
+      maxWidth: "320px",
+      minWidth: "220px",
       opacity: "0",
-      transform: "translateX(20px)",
-      transition: "all 0.3s ease"
+      transform: "translateX(100%) scale(0.95)",
+      transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+      overflow: "hidden",
+      position: "relative"
     })
 
-    Object.assign(accentBar.style, {
+    // Success icon SVG with your theme colors
+    const iconSVG = `
+      <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #b6b9be, #9ca3af); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(182, 185, 190, 0.2);">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M9 12l2 2 4-4" stroke="#0a0a0f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    `
+
+    // Message text with proper styling
+    const textElement = document.createElement("span")
+    textElement.textContent = message
+    Object.assign(textElement.style, {
+      fontSize: "14px",
+      lineHeight: "1.4",
+      color: "#b6b9be",
+      fontWeight: "500",
+      letterSpacing: "-0.01em"
+    })
+
+    // Progress bar with theme colors
+    const progressBar = document.createElement("div")
+    Object.assign(progressBar.style, {
       position: "absolute",
       bottom: "0",
       left: "0",
-      height: "3px",
+      height: "2px",
       width: "100%",
-      backgroundColor: "#10b981",
-      transition: `width ${toastDuration}ms linear`
+      background: "linear-gradient(90deg, #b6b9be, #9ca3af)",
+      borderRadius: "0 0 16px 16px",
+      transformOrigin: "left",
+      transform: "scaleX(1)",
+      transition: "transform 3200ms linear",
+      opacity: "0.8"
     })
 
+    // Light rays effect overlay (subtle)
+    const raysOverlay = document.createElement("div")
+    Object.assign(raysOverlay.style, {
+      position: "absolute",
+      top: "0",
+      left: "0",
+      right: "0",
+      bottom: "0",
+      background:
+        "radial-gradient(circle at 20% 20%, rgba(182, 185, 190, 0.03) 0%, transparent 50%)",
+      borderRadius: "16px",
+      pointerEvents: "none"
+    })
+
+    // Assemble the toast
+    toast.innerHTML = iconSVG
+    toast.appendChild(textElement)
+    toast.appendChild(progressBar)
+    toast.appendChild(raysOverlay)
     wrapper.appendChild(toast)
+
+    // Add to DOM
     document.body.appendChild(wrapper)
 
-    setTimeout(() => {
+    // Animate in with your UI's smooth transitions
+    requestAnimationFrame(() => {
       toast.style.opacity = "1"
-      toast.style.transform = "translateX(0)"
-      accentBar.style.width = "0%"
-    }, 10)
+      toast.style.transform = "translateX(0) scale(1)"
 
+      // Start progress bar animation
+      setTimeout(() => {
+        progressBar.style.transform = "scaleX(0)"
+      }, 150)
+    })
+
+    // Animate out and remove
     setTimeout(() => {
       toast.style.opacity = "0"
-      toast.style.transform = "translateX(20px)"
+      toast.style.transform = "translateX(100%) scale(0.95)"
+
       setTimeout(() => {
         if (wrapper.parentNode) {
           wrapper.parentNode.removeChild(wrapper)
         }
-      }, 300)
-    }, toastDuration)
-  }
+      }, 400)
+    }, 3200)
 
-  const playNotificationSound = () => {
-    try {
-      const ctx = new (window.AudioContext ||
-        (window as any).webkitAudioContext)()
-      const oscillator = ctx.createOscillator()
-      const gain = ctx.createGain()
-
-      oscillator.type = "sine"
-      oscillator.frequency.setValueAtTime(650, ctx.currentTime)
-      gain.gain.setValueAtTime(0.1, ctx.currentTime)
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2)
-
-      oscillator.connect(gain).connect(ctx.destination)
-      oscillator.start()
-      oscillator.stop(ctx.currentTime + 0.2)
-    } catch (error) {
-      // Audio not available, silently fail
-    }
+    log("🍞 Dark UI toast notification displayed:", message)
   }
 
   // Process input with snippet replacement
@@ -396,6 +493,7 @@ const QuickTypeContent = () => {
     let originalText = element.textContent
     let newText = originalText
     let hasReplacement = false
+    let replacedKeywords: string[] = []
 
     for (const [keyword, replacement] of Object.entries(snippets)) {
       if (newText.includes(keyword)) {
@@ -404,6 +502,7 @@ const QuickTypeContent = () => {
           replacement
         )
         hasReplacement = true
+        replacedKeywords.push(keyword)
         log(`🔄 Replaced "${keyword}" with "${replacement}" in contenteditable`)
       }
     }
@@ -440,6 +539,17 @@ const QuickTypeContent = () => {
       // Trigger input events
       const inputEvent = new Event("input", { bubbles: true })
       element.dispatchEvent(inputEvent)
+
+      // Show toast for contenteditable replacements
+      if (replacedKeywords.length > 0) {
+        const keyword = replacedKeywords[0]
+        const replacement = snippets[keyword]
+        const displayText =
+          replacement.length > 30
+            ? replacement.substring(0, 30) + "..."
+            : replacement
+        createToast(`${keyword} → ${displayText}`)
+      }
     }
   }
 
@@ -450,6 +560,16 @@ const QuickTypeContent = () => {
     log("🎧 Setting up comprehensive input detection", {
       snippetsCount: Object.keys(snippets).length
     })
+
+    // Initialize audio context on first user interaction
+    const initAudioOnInteraction = () => {
+      initializeAudioContext()
+      document.removeEventListener("click", initAudioOnInteraction)
+      document.removeEventListener("keydown", initAudioOnInteraction)
+    }
+
+    document.addEventListener("click", initAudioOnInteraction, { once: true })
+    document.addEventListener("keydown", initAudioOnInteraction, { once: true })
 
     // Strategy 1: Traditional event listeners
     const handleEvent = (e: Event) => {
@@ -573,6 +693,8 @@ const QuickTypeContent = () => {
         document.removeEventListener(eventType, handleEvent, true)
       })
       document.removeEventListener("focus", handleFocus, true)
+      document.removeEventListener("click", initAudioOnInteraction)
+      document.removeEventListener("keydown", initAudioOnInteraction)
 
       // Clear timeouts
       if (inputTimeoutRef.current) {
@@ -602,6 +724,10 @@ const QuickTypeContent = () => {
       console.log("- Current snippets:", snippets)
       console.log("- Global snippets:", globalSnippets)
       console.log("- Currently focused element:", focusedElementRef.current)
+      console.log(
+        "- Audio context:",
+        audioContextRef.current?.state || "Not initialized"
+      )
 
       // Count inputs on page
       const allInputs = document.querySelectorAll(
@@ -653,6 +779,14 @@ const QuickTypeContent = () => {
         }
       }, 15000)
     }
+    ;(window as any).quickTypeTestToast = () => {
+      log("🧪 Testing toast notification")
+      createToast("Test notification - this should appear!")
+    }
+    ;(window as any).quickTypeTestSound = () => {
+      log("🧪 Testing sound")
+      playNotificationSound()
+    }
     ;(window as any).quickTypeReload = () => {
       log("🔄 Manually reloading snippets...")
       loadSnippetsFromBackground()
@@ -664,6 +798,7 @@ const QuickTypeContent = () => {
         snippetsCount: Object.keys(snippets).length,
         snippets: snippets,
         focusedElement: focusedElementRef.current?.tagName || null,
+        audioContext: audioContextRef.current?.state || "Not initialized",
         totalInputsOnPage: document.querySelectorAll(
           'input, textarea, [contenteditable="true"], [contenteditable=""]'
         ).length
@@ -711,6 +846,8 @@ const init = () => {
     log("💡 Available debug commands:")
     log("  - quickTypeDebug() - Show debug info and count inputs")
     log("  - quickTypeTest() - Create test input with auto-typing")
+    log("  - quickTypeTestToast() - Test toast notification")
+    log("  - quickTypeTestSound() - Test notification sound")
     log("  - quickTypeStatus() - Get current status")
     log("  - quickTypeReload() - Reload snippets from background")
   } catch (error) {
