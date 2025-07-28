@@ -16,6 +16,7 @@ const QuickTypeContent = () => {
   const [snippets, setSnippets] = useState(globalSnippets)
   const [isInitialized, setIsInitialized] = useState(false)
   const [user, setUser] = useState(null)
+  const [usageCounts, setUsageCounts] = useState<Record<string, number>>({})
   const inputTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<MutationObserver | null>(null)
   const focusedElementRef = useRef<HTMLElement | null>(null)
@@ -34,11 +35,34 @@ const QuickTypeContent = () => {
         log("✅ Snippets loaded from background:", response.snippets)
         globalSnippets = response.snippets
         setSnippets(response.snippets)
+
+        // Load usage metadata if available
+        if (response.snippetsWithMetadata) {
+          const usageData: Record<string, number> = {}
+          response.snippetsWithMetadata.forEach((item: any) => {
+            usageData[item.keyword] = item.usageCount || 0
+          })
+          setUsageCounts(usageData)
+          log("📊 Usage counts loaded:", usageData)
+        }
       } else {
         log("ℹ️ No snippets from background, keeping defaults")
       }
     } catch (error) {
       log("❌ Error loading snippets from background:", error)
+    }
+  }
+
+  // Increment usage count for a keyword
+  const incrementUsageCount = async (keyword: string) => {
+    try {
+      await chrome.runtime.sendMessage({
+        type: "INCREMENT_USAGE",
+        keyword: keyword
+      })
+      log(`📈 Usage count incremented for: ${keyword}`)
+    } catch (error) {
+      log("❌ Error incrementing usage count:", error)
     }
   }
 
@@ -54,6 +78,16 @@ const QuickTypeContent = () => {
           log("✅ User snippets loaded:", response.snippets)
           globalSnippets = response.snippets
           setSnippets(response.snippets)
+
+          // Load usage metadata if available
+          if (response.snippetsWithMetadata) {
+            const usageData: Record<string, number> = {}
+            response.snippetsWithMetadata.forEach((item: any) => {
+              usageData[item.keyword] = item.usageCount || 0
+            })
+            setUsageCounts(usageData)
+            log("📊 Initial usage counts loaded:", usageData)
+          }
         }
       } else {
         log("🚫 No user logged in")
@@ -82,6 +116,16 @@ const QuickTypeContent = () => {
             log("✅ User snippets received:", message.snippets)
             globalSnippets = message.snippets
             setSnippets(message.snippets)
+
+            // Load usage metadata if available
+            if (message.snippetsWithMetadata) {
+              const usageData: Record<string, number> = {}
+              message.snippetsWithMetadata.forEach((item: any) => {
+                usageData[item.keyword] = item.usageCount || 0
+              })
+              setUsageCounts(usageData)
+              log("📊 Login usage counts loaded:", usageData)
+            }
           }
           break
 
@@ -103,6 +147,25 @@ const QuickTypeContent = () => {
             globalSnippets = message.snippets
             setSnippets(message.snippets)
           }
+          // Also update usage counts if metadata is provided
+          if (message.snippetsWithMetadata) {
+            const usageData: Record<string, number> = {}
+            message.snippetsWithMetadata.forEach((item: any) => {
+              usageData[item.keyword] = item.usageCount || 0
+            })
+            setUsageCounts(usageData)
+            log("📊 Usage counts updated:", usageData)
+          }
+          break
+
+        case "USAGE_UPDATED":
+          log("📈 Usage updated message received:", message)
+          // Update local usage counts for toast display
+          setUsageCounts((prev) => ({
+            ...prev,
+            [message.keyword]: message.usageCount
+          }))
+          log(`📊 Usage count for ${message.keyword}: ${message.usageCount}`)
           break
 
         default:
@@ -140,60 +203,60 @@ const QuickTypeContent = () => {
   // Notification pop sound - Bolder and Louder
   const playNotificationSound = async () => {
     try {
-      initializeAudioContext();
+      initializeAudioContext()
 
       if (!audioContextRef.current) {
-        log("🔇 Audio context not available");
-        return;
+        log("🔇 Audio context not available")
+        return
       }
 
       if (audioContextRef.current.state === "suspended") {
-        await audioContextRef.current.resume();
+        await audioContextRef.current.resume()
       }
 
-      const ctx = audioContextRef.current;
-      const now = ctx.currentTime;
-      const volume = 0.35; // Increased volume
+      const ctx = audioContextRef.current
+      const now = ctx.currentTime
+      const volume = 0.35 // Increased volume
 
       // 1. Create the Main Sound Source (Triangle Wave)
       // A triangle wave sounds richer and less sharp than a sine wave.
-      const mainOscillator = ctx.createOscillator();
-      mainOscillator.type = "triangle";
+      const mainOscillator = ctx.createOscillator()
+      mainOscillator.type = "triangle"
       // Lowered frequency to 650Hz to make it less shrill.
-      mainOscillator.frequency.setValueAtTime(650, now);
+      mainOscillator.frequency.setValueAtTime(650, now)
 
       // 2. Create a Bass Layer for "Body" (Sine Wave)
       // This adds a low-end "thump" to make the pop feel more bold.
-      const bassOscillator = ctx.createOscillator();
-      bassOscillator.type = "sine";
-      bassOscillator.frequency.setValueAtTime(120, now);
+      const bassOscillator = ctx.createOscillator()
+      bassOscillator.type = "sine"
+      bassOscillator.frequency.setValueAtTime(120, now)
 
       // 3. Create the Volume Envelope (GainNode)
-      const gainNode = ctx.createGain();
-      gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
+      const gainNode = ctx.createGain()
+      gainNode.gain.setValueAtTime(0, now)
+      gainNode.gain.linearRampToValueAtTime(volume, now + 0.01)
       // Slightly longer decay for a fuller sound.
-      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1)
 
       // 4. Connect everything and play
       // Both oscillators connect to the same gain node.
-      mainOscillator.connect(gainNode);
-      bassOscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
+      mainOscillator.connect(gainNode)
+      bassOscillator.connect(gainNode)
+      gainNode.connect(ctx.destination)
 
-      mainOscillator.start(now);
-      bassOscillator.start(now);
-      mainOscillator.stop(now + 0.1);
-      bassOscillator.stop(now + 0.1);
+      mainOscillator.start(now)
+      bassOscillator.start(now)
+      mainOscillator.stop(now + 0.1)
+      bassOscillator.stop(now + 0.1)
 
-      log("🔊 Bolder pop notification sound played");
+      log("🔊 Bolder pop notification sound played")
     } catch (error) {
-      log("🔇 Audio playback failed:", error);
+      log("🔇 Audio playback failed:", error)
     }
-  };
+  }
 
   // Dark UI themed toast notification system
-  const createToast = (message: string) => {
+  const createToast = (message: string, usageCount?: number) => {
     // Remove existing toast if present
     const existingToast = document.querySelector(".quicktype-toast-wrapper")
     if (existingToast) {
@@ -253,6 +316,15 @@ const QuickTypeContent = () => {
       </div>
     `
 
+    // Main content container
+    const contentContainer = document.createElement("div")
+    Object.assign(contentContainer.style, {
+      display: "flex",
+      flexDirection: "column",
+      gap: "4px",
+      flex: "1"
+    })
+
     // Message text with proper styling
     const textElement = document.createElement("span")
     textElement.textContent = message
@@ -262,6 +334,31 @@ const QuickTypeContent = () => {
       color: "#b6b9be",
       fontWeight: "500",
       letterSpacing: "-0.01em"
+    })
+
+    // Usage count badge (always show)
+    const usageBadge = document.createElement("div")
+    const timesUsed = (usageCount || 0) + 1
+    usageBadge.innerHTML = `
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" style="margin-right: 4px; display: inline-block; vertical-align: middle;">
+        <path d="M3 3v18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9 9l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span style="vertical-align: middle;">Used ${timesUsed} ${timesUsed === 1 ? "time" : "times"}</span>
+    `
+    Object.assign(usageBadge.style, {
+      fontSize: "11px",
+      lineHeight: "1.2",
+      color: "#b6b9be",
+      opacity: "0.7",
+      fontWeight: "500",
+      background: "rgba(182, 185, 190, 0.1)",
+      padding: "3px 8px",
+      borderRadius: "6px",
+      display: "inline-flex",
+      alignItems: "center",
+      marginTop: "2px",
+      width: "fit-content" // Ensure the badge fits its content
     })
 
     // Progress bar with theme colors
@@ -295,8 +392,11 @@ const QuickTypeContent = () => {
     })
 
     // Assemble the toast
+    contentContainer.appendChild(textElement)
+    contentContainer.appendChild(usageBadge)
+
     toast.innerHTML = iconSVG
-    toast.appendChild(textElement)
+    toast.appendChild(contentContainer)
     toast.appendChild(progressBar)
     toast.appendChild(raysOverlay)
     wrapper.appendChild(toast)
@@ -451,7 +551,13 @@ const QuickTypeContent = () => {
           replacement.length > 30
             ? replacement.substring(0, 30) + "..."
             : replacement
-        createToast(`${keyword} → ${displayText}`)
+        const currentUsage = usageCounts[keyword] || 0
+        createToast(`${keyword} → ${displayText}`, currentUsage)
+
+        // Increment usage count for all replaced keywords
+        replacedKeywords.forEach((replacedKeyword) => {
+          incrementUsageCount(replacedKeyword)
+        })
       }
     } else {
       log("⏭️ No replacements needed")
@@ -548,7 +654,13 @@ const QuickTypeContent = () => {
           replacement.length > 30
             ? replacement.substring(0, 30) + "..."
             : replacement
-        createToast(`${keyword} → ${displayText}`)
+        const currentUsage = usageCounts[keyword] || 0
+        createToast(`${keyword} → ${displayText}`, currentUsage)
+
+        // Increment usage count for all replaced keywords
+        replacedKeywords.forEach((replacedKeyword) => {
+          incrementUsageCount(replacedKeyword)
+        })
       }
     }
   }
@@ -797,6 +909,7 @@ const QuickTypeContent = () => {
         user: user?.email || null,
         snippetsCount: Object.keys(snippets).length,
         snippets: snippets,
+        usageCounts: usageCounts,
         focusedElement: focusedElementRef.current?.tagName || null,
         audioContext: audioContextRef.current?.state || "Not initialized",
         totalInputsOnPage: document.querySelectorAll(

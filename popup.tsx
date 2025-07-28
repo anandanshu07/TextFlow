@@ -1,4 +1,13 @@
-import { LogOut, Plus, Save, Trash2, User } from "lucide-react"
+import {
+  BarChart3,
+  Clock,
+  LogOut,
+  Plus,
+  Save,
+  Trash2,
+  TrendingUp,
+  User
+} from "lucide-react"
 import React, { useEffect, useState } from "react"
 
 import "./style.css"
@@ -6,9 +15,19 @@ import "./style.css"
 import LightRays from "~components/LightRays/LightRays"
 import { StatefulButton } from "~components/StatefulButton"
 
+interface SnippetWithMetadata {
+  keyword: string
+  value: string
+  usageCount: number
+  lastUsed?: Date
+  docId?: string
+}
+
 const IndexPopup = () => {
-  const [items, setItems] = useState([])
-  const [selectedItem, setSelectedItem] = useState(null)
+  const [items, setItems] = useState<SnippetWithMetadata[]>([])
+  const [selectedItem, setSelectedItem] = useState<SnippetWithMetadata | null>(
+    null
+  )
   const [keyword, setKeyword] = useState("/")
   const [value, setValue] = useState("")
   const [isEditing, setIsEditing] = useState(false)
@@ -18,6 +37,10 @@ const IndexPopup = () => {
   const [saving, setSaving] = useState(false)
   const [user, setUser] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [sortBy, setSortBy] = useState<"recent" | "usage" | "alphabetical">(
+    "recent"
+  )
+  const [showStats, setShowStats] = useState(false)
 
   // Load items from background script when user logs in
   useEffect(() => {
@@ -49,19 +72,8 @@ const IndexPopup = () => {
         setUser(response.user)
         setIsLoading(response.isLoading)
 
-        if (response.user) {
-          // Convert snippets to items format for the UI
-          const itemsFromSnippets = Object.entries(response.snippets || {}).map(
-            ([keyword, value], index) => ({
-              id: `snippet-${index}`,
-              keyword,
-              value,
-              userId: response.user.uid,
-              createdAt: new Date(),
-              updatedAt: new Date()
-            })
-          )
-          setItems(itemsFromSnippets)
+        if (response.user && response.snippetsWithMetadata) {
+          setItems(response.snippetsWithMetadata)
         }
       } catch (error) {
         console.error("Error getting user state:", error)
@@ -78,21 +90,24 @@ const IndexPopup = () => {
         setUser(message.user)
         setIsLoading(message.isLoading)
 
-        if (message.user && message.snippets) {
-          const itemsFromSnippets = Object.entries(message.snippets).map(
-            ([keyword, value], index) => ({
-              id: `snippet-${index}`,
-              keyword,
-              value,
-              userId: message.user.uid,
-              createdAt: new Date(),
-              updatedAt: new Date()
-            })
-          )
-          setItems(itemsFromSnippets)
+        if (message.user && message.snippetsWithMetadata) {
+          setItems(message.snippetsWithMetadata)
         } else if (!message.user) {
           setItems([])
         }
+      } else if (message.type === "USAGE_UPDATED") {
+        // Update usage count for specific item
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.keyword === message.keyword
+              ? {
+                  ...item,
+                  usageCount: message.usageCount,
+                  lastUsed: message.lastUsed
+                }
+              : item
+          )
+        )
       }
     }
 
@@ -112,21 +127,8 @@ const IndexPopup = () => {
         type: "GET_SNIPPETS"
       })
 
-      if (response.snippets) {
-        // Convert snippets to items format for the UI
-        const itemsFromSnippets = Object.entries(response.snippets).map(
-          ([keyword, value], index) => ({
-            id: `snippet-${index}`,
-            keyword,
-            value,
-            userId: user.uid,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-        )
-        setItems(itemsFromSnippets)
-
-        
+      if (response.snippetsWithMetadata) {
+        setItems(response.snippetsWithMetadata)
       }
     } catch (error) {
       console.error("Error loading items:", error)
@@ -136,14 +138,65 @@ const IndexPopup = () => {
     }
   }
 
-  
+  // Sort items based on selected criteria
+  const getSortedItems = () => {
+    const sortedItems = [...items]
+
+    switch (sortBy) {
+      case "usage":
+        return sortedItems.sort((a, b) => b.usageCount - a.usageCount)
+      case "alphabetical":
+        return sortedItems.sort((a, b) => a.keyword.localeCompare(b.keyword))
+      case "recent":
+      default:
+        return sortedItems.sort((a, b) => {
+          if (!a.lastUsed && !b.lastUsed) return 0
+          if (!a.lastUsed) return 1
+          if (!b.lastUsed) return -1
+          return new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime()
+        })
+    }
+  }
+
+  const formatLastUsed = (lastUsed?: Date) => {
+    if (!lastUsed) return "Never used"
+
+    const now = new Date()
+    const diffMs = now.getTime() - new Date(lastUsed).getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+    if (diffMins < 1) return "Just now"
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    if (diffDays < 7) return `${diffDays}d ago`
+
+    return new Date(lastUsed).toLocaleDateString()
+  }
+
+  const getTotalUsage = () => {
+    return items.reduce((sum, item) => sum + item.usageCount, 0)
+  }
+
+  const getMostUsedItem = () => {
+    return items.reduce(
+      (max, item) => (item.usageCount > max.usageCount ? item : max),
+      {
+        keyword: "",
+        value: "",
+        usageCount: 0,
+        docId: undefined
+      } as SnippetWithMetadata
+    )
+  }
 
   const addNewItem = () => {
-    const newItem = {
-      id: null, // Will be set when saved
+    const newItem: SnippetWithMetadata = {
       keyword: "/",
       value: "",
-      userId: user.uid
+      usageCount: 0,
+      docId: undefined
     }
     setSelectedItem(newItem)
     setKeyword("/")
@@ -158,7 +211,7 @@ const IndexPopup = () => {
     }
   }
 
-  const selectItem = (item) => {
+  const selectItem = (item: SnippetWithMetadata) => {
     setSelectedItem(item)
     setKeyword(item.keyword)
     setValue(item.value)
@@ -183,7 +236,8 @@ const IndexPopup = () => {
 
     // Check for duplicate keyword (excluding current item)
     const existingKeywordItem = items.find(
-      (item) => item.keyword === trimmedKeyword && item.id !== selectedItem?.id
+      (item) =>
+        item.keyword === trimmedKeyword && item.docId !== selectedItem?.docId
     )
     if (existingKeywordItem) {
       alert(
@@ -194,7 +248,8 @@ const IndexPopup = () => {
 
     // Check for duplicate value (excluding current item)
     const existingValueItem = items.find(
-      (item) => item.value === trimmedValue && item.id !== selectedItem?.id
+      (item) =>
+        item.value === trimmedValue && item.docId !== selectedItem?.docId
     )
     if (existingValueItem) {
       alert(
@@ -214,13 +269,11 @@ const IndexPopup = () => {
         })
 
         if (response.success) {
-          const newItem = {
-            id: response.docId || `new-${Date.now()}`,
+          const newItem: SnippetWithMetadata = {
             keyword: trimmedKeyword,
             value: trimmedValue,
-            userId: user.uid,
-            createdAt: new Date(),
-            updatedAt: new Date()
+            usageCount: 0,
+            docId: response.docId || `new-${Date.now()}`
           }
 
           setItems((prevItems) => [newItem, ...prevItems])
@@ -238,16 +291,15 @@ const IndexPopup = () => {
         })
 
         if (response.success) {
-          const updatedItem = {
-            ...selectedItem,
+          const updatedItem: SnippetWithMetadata = {
+            ...selectedItem!,
             keyword: trimmedKeyword,
-            value: trimmedValue,
-            updatedAt: new Date()
+            value: trimmedValue
           }
 
           setItems((prevItems) =>
             prevItems.map((item) =>
-              item.id === selectedItem.id ? updatedItem : item
+              item.docId === selectedItem?.docId ? updatedItem : item
             )
           )
           setSelectedItem(updatedItem)
@@ -264,11 +316,11 @@ const IndexPopup = () => {
     }
   }
 
-  const deleteItem = async (itemToDelete) => {
+  const deleteItem = async (itemToDelete: SnippetWithMetadata) => {
     if (!user) return
 
     // Add to deleting set for animation
-    setDeletingItems((prev) => new Set(prev).add(itemToDelete.id))
+    setDeletingItems((prev) => new Set(prev).add(itemToDelete.docId))
 
     // Wait for animation
     setTimeout(async () => {
@@ -282,10 +334,10 @@ const IndexPopup = () => {
         if (response.success) {
           // Update local state
           setItems((prevItems) =>
-            prevItems.filter((item) => item.id !== itemToDelete.id)
+            prevItems.filter((item) => item.docId !== itemToDelete.docId)
           )
 
-          if (selectedItem && selectedItem.id === itemToDelete.id) {
+          if (selectedItem && selectedItem.docId === itemToDelete.docId) {
             setSelectedItem(null)
             setKeyword("/")
             setValue("")
@@ -300,7 +352,7 @@ const IndexPopup = () => {
         // Remove from deleting set
         setDeletingItems((prev) => {
           const newSet = new Set(prev)
-          newSet.delete(itemToDelete.id)
+          newSet.delete(itemToDelete.docId)
           return newSet
         })
       }
@@ -321,19 +373,8 @@ const IndexPopup = () => {
         setUser(userResponse.user)
         setIsLoading(userResponse.isLoading)
 
-        if (userResponse.user) {
-          // Convert snippets to items format for the UI
-          const itemsFromSnippets = Object.entries(
-            userResponse.snippets || {}
-          ).map(([keyword, value], index) => ({
-            id: `snippet-${index}`,
-            keyword,
-            value,
-            userId: userResponse.user.uid,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }))
-          setItems(itemsFromSnippets)
+        if (userResponse.user && userResponse.snippetsWithMetadata) {
+          setItems(userResponse.snippetsWithMetadata)
         }
       } else {
         alert(`Login failed: ${response.error}`)
@@ -484,12 +525,65 @@ const IndexPopup = () => {
             </p>
           </div>
         </div>
-        <button
-          onClick={onLogout}
-          className="p-2 text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10 rounded-lg transition-all duration-200 backdrop-blur-sm">
-          <LogOut size={16} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowStats(!showStats)}
+            className="p-2 text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10 rounded-lg transition-all duration-200 backdrop-blur-sm">
+            <BarChart3 size={16} />
+          </button>
+          <button
+            onClick={onLogout}
+            className="p-2 text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10 rounded-lg transition-all duration-200 backdrop-blur-sm">
+            <LogOut size={16} />
+          </button>
+        </div>
       </div>
+
+      {/* Stats Panel */}
+      {showStats && (
+        <div className="absolute top-16 right-0 w-80 bg-[#0a0a0f]/95 backdrop-blur-md border-l border-[#b6b9be]/10 z-20 p-6">
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-[#b6b9be] font-figtree flex items-center gap-2">
+              <TrendingUp size={18} />
+              Usage Statistics
+            </h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-[#b6b9be]/10 rounded-lg p-3 backdrop-blur-sm">
+                <div className="text-2xl font-bold text-[#b6b9be] font-figtree">
+                  {getTotalUsage()}
+                </div>
+                <div className="text-xs text-[#b6b9be]/60 font-figtree">
+                  Total Uses
+                </div>
+              </div>
+
+              <div className="bg-[#b6b9be]/10 rounded-lg p-3 backdrop-blur-sm">
+                <div className="text-2xl font-bold text-[#b6b9be] font-figtree">
+                  {items.length}
+                </div>
+                <div className="text-xs text-[#b6b9be]/60 font-figtree">
+                  Total Shortcuts
+                </div>
+              </div>
+            </div>
+
+            {getMostUsedItem().usageCount > 0 && (
+              <div className="bg-[#b6b9be]/5 rounded-lg p-3 backdrop-blur-sm border border-[#b6b9be]/10">
+                <div className="text-sm font-medium text-[#b6b9be] font-figtree mb-1">
+                  Most Used Shortcut
+                </div>
+                <div className="text-xs text-[#b6b9be]/80 font-mono">
+                  {getMostUsedItem().keyword}
+                </div>
+                <div className="text-xs text-[#b6b9be]/60 font-figtree">
+                  Used {getMostUsedItem().usageCount} times
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Left Sidebar */}
       <div className="w-80 bg-[#0a0a0f]/40 backdrop-blur-md border-r border-[#b6b9be]/10 flex flex-col mt-16 relative z-10">
@@ -509,6 +603,27 @@ const IndexPopup = () => {
               Add New
             </button>
           </div>
+
+          {/* Sort Options */}
+          <div className="flex gap-1 bg-[#b6b9be]/10 rounded-lg p-1 backdrop-blur-sm">
+            {[
+              { key: "recent", label: "Recent", icon: Clock },
+              { key: "usage", label: "Usage", icon: TrendingUp },
+              { key: "alphabetical", label: "A-Z", icon: null }
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => setSortBy(key as any)}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md text-xs font-figtree transition-all duration-200 ${
+                  sortBy === key
+                    ? "bg-[#b6b9be] text-[#0a0a0f]"
+                    : "text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10"
+                }`}>
+                {Icon && <Icon size={12} />}
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -521,9 +636,9 @@ const IndexPopup = () => {
             </div>
           ) : items.length === 0 ? (
             <div className="p-6 text-center animate-fade-in">
-              <div onClick={addNewItem}
-                  
-                  className="w-16 h-16 mx-auto bg-[#b6b9be]/10 rounded-full flex items-center justify-center mb-4 backdrop-blur-sm">
+              <div
+                onClick={addNewItem}
+                className="w-16 h-16 mx-auto bg-[#b6b9be]/10 rounded-full flex items-center justify-center mb-4 backdrop-blur-sm cursor-pointer hover:bg-[#b6b9be]/20 transition-all duration-200">
                 <Plus size={24} className="text-[#b6b9be]/60" />
               </div>
               <p className="text-[#b6b9be]/70 mb-2 font-figtree">
@@ -535,27 +650,43 @@ const IndexPopup = () => {
             </div>
           ) : (
             <div className="p-3 space-y-2">
-              {items.map((item, index) => (
+              {getSortedItems().map((item, index) => (
                 <div
-                  key={item.id}
+                  key={item.docId}
                   className={`
                     group p-3 rounded-xl cursor-pointer transition-all duration-300 border backdrop-blur-sm
                     ${
-                      selectedItem && selectedItem.id === item.id
+                      selectedItem && selectedItem.docId === item.docId
                         ? "bg-[#b6b9be]/20 border-[#b6b9be]/30  shadow-[#b6b9be]/10"
                         : "bg-[#b6b9be]/5 border-[#b6b9be]/10 hover:bg-[#b6b9be]/10 hover:border-[#b6b9be]/20  hover:shadow-[#b6b9be]/5"
                     }
-                    ${deletingItems.has(item.id) ? "animate-slide-out-left opacity-0 transform -translate-x-full" : "animate-slide-in-item"}
+                    ${deletingItems.has(item.docId) ? "animate-slide-out-left opacity-0 transform -translate-x-full" : "animate-slide-in-item"}
                   `}
                   style={{ animationDelay: `${index * 50}ms` }}
                   onClick={() => selectItem(item)}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-[#b6b9be] truncate mb-1 font-figtree">
-                        {item.keyword || "Untitled"}
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="font-medium text-[#b6b9be] truncate font-figtree">
+                          {item.keyword || "Untitled"}
+                        </div>
+                        {item.usageCount > 0 && (
+                          <div className="flex items-center gap-1 px-2 py-0.5 bg-[#b6b9be]/20 rounded-full">
+                            <TrendingUp
+                              size={10}
+                              className="text-[#b6b9be]/60"
+                            />
+                            <span className="text-xs text-[#b6b9be]/60 font-figtree font-medium">
+                              {item.usageCount}
+                            </span>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-sm text-[#b6b9be]/60 truncate font-figtree">
+                      <div className="text-sm text-[#b6b9be]/60 truncate font-figtree mb-1">
                         {item.value || "No value"}
+                      </div>
+                      <div className="text-xs text-[#b6b9be]/40 font-figtree">
+                        {formatLastUsed(item.lastUsed)}
                       </div>
                     </div>
                     <button
@@ -580,9 +711,23 @@ const IndexPopup = () => {
           <div className="flex-1 flex flex-col animate-fade-in">
             <div className="p-6 border-b border-[#b6b9be]/10 bg-[#0a0a0f]/40 backdrop-blur-md">
               <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-bold text-[#b6b9be] font-figtree">
-                  {isEditing ? "Create New Item" : "Edit Item"}
-                </h1>
+                <div>
+                  <h1 className="text-2xl font-bold text-[#b6b9be] font-figtree">
+                    {isEditing ? "Create New Item" : "Edit Item"}
+                  </h1>
+                  {!isEditing && selectedItem.usageCount > 0 && (
+                    <div className="mt-2 flex items-center gap-4 text-sm text-[#b6b9be]/60 font-figtree">
+                      <span className="flex items-center gap-1">
+                        <TrendingUp size={14} />
+                        Used {selectedItem.usageCount} times
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={14} />
+                        {formatLastUsed(selectedItem.lastUsed)}
+                      </span>
+                    </div>
+                  )}
+                </div>
                 {value && (
                   <StatefulButton
                     onClick={saveCurrentItem}
@@ -654,7 +799,9 @@ const IndexPopup = () => {
         ) : (
           <div className="flex-1 flex items-center justify-center bg-[#0a0a0f]/20 backdrop-blur-sm">
             <div className="text-center animate-fade-in">
-              <div onClick={addNewItem}  className="w-24 h-24 mx-auto bg-gradient-to-r from-[#b6b9be]/20 to-[#9ca3af]/20 rounded-full flex items-center justify-center mb-6 animate-pulse-slow backdrop-blur-sm shadow-lg shadow-[#b6b9be]/10">
+              <div
+                onClick={addNewItem}
+                className="w-24 h-24 mx-auto bg-gradient-to-r from-[#b6b9be]/20 to-[#9ca3af]/20 rounded-full flex items-center justify-center mb-6 animate-pulse-slow backdrop-blur-sm shadow-lg  cursor-pointer hover:from-[#b6b9be]/30 hover:to-[#9ca3af]/30 transition-all duration-200">
                 <Plus size={32} className="text-[#b6b9be]/60" />
               </div>
               <h3 className="text-xl font-semibold text-[#b6b9be] mb-2 font-figtree">
@@ -664,6 +811,18 @@ const IndexPopup = () => {
                 Select an item from the sidebar to edit, or create a new
                 shortcut to get started
               </p>
+              {items.length > 0 && (
+                <div className="mt-6 p-4 bg-[#b6b9be]/5 rounded-lg backdrop-blur-sm border border-[#b6b9be]/10">
+                  <p className="text-sm text-[#b6b9be]/70 font-figtree mb-2">
+                    📊 Your Usage
+                  </p>
+                  <div className="flex justify-center gap-4 text-xs text-[#b6b9be]/60 font-figtree">
+                    <span>{items.length} shortcuts</span>
+                    <span>•</span>
+                    <span>{getTotalUsage()} total uses</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -15,8 +15,10 @@ import {
   doc,
   getDocs,
   getFirestore,
+  increment,
   orderBy,
   query,
+  updateDoc,
   where
 } from "firebase/firestore"
 
@@ -57,9 +59,13 @@ try {
 // Global state
 let currentUser: any = null
 let userSnippets: Record<string, string> = {}
+let snippetMetadata: Record<
+  string,
+  { docId: string; usageCount: number; lastUsed?: Date }
+> = {}
 let isLoading = false
 
-// Load user snippets from Firebase
+// Load user snippets from Firebase with metadata
 const loadUserSnippets = async (userId: string) => {
   if (!firestore) {
     log("❌ Firestore not available")
@@ -78,29 +84,130 @@ const loadUserSnippets = async (userId: string) => {
     const snapshot = await getDocs(userItemsRef)
 
     const snippets: Record<string, string> = {}
+    const metadata: Record<
+      string,
+      { docId: string; usageCount: number; lastUsed?: Date }
+    > = {}
 
     if (!snapshot.empty) {
       snapshot.docs.forEach((doc) => {
         const data = doc.data()
         const keyword = data.keyword || data.shortcut || data.trigger
         const value = data.value || data.text || data.content
+        const usageCount = data.usageCount || 0
+        const lastUsed = data.lastUsed ? data.lastUsed.toDate() : undefined
 
         if (keyword && value) {
           const formattedKeyword = keyword.startsWith("/")
             ? keyword
             : `/${keyword}`
           snippets[formattedKeyword] = value
-          log(`✅ Loaded snippet: ${formattedKeyword} -> ${value}`)
+          metadata[formattedKeyword] = {
+            docId: doc.id,
+            usageCount,
+            lastUsed
+          }
+          log(
+            `✅ Loaded snippet: ${formattedKeyword} -> ${value} (used ${usageCount} times)`
+          )
         }
       })
     }
 
-    log(`🎉 Loaded ${Object.keys(snippets).length} snippets`)
+    // Update global state
+    snippetMetadata = metadata
+
+    log(`🎉 Loaded ${Object.keys(snippets).length} snippets with metadata`)
     return snippets
   } catch (error) {
     log("❌ Error loading snippets:", error)
     return {}
   }
+}
+
+// Increment usage count for a keyword
+const incrementUsageCount = async (keyword: string) => {
+  if (!currentUser || !firestore || !snippetMetadata[keyword]) {
+    log(
+      "❌ Cannot increment usage count - user not logged in or keyword not found"
+    )
+    return
+  }
+
+  try {
+    const { docId } = snippetMetadata[keyword]
+    const docRef = doc(
+      firestore,
+      "quickTypeItems",
+      currentUser.uid,
+      "items",
+      docId
+    )
+
+    // Update in Firebase
+    await updateDoc(docRef, {
+      usageCount: increment(1),
+      lastUsed: new Date()
+    })
+
+    // Update local metadata
+    snippetMetadata[keyword].usageCount += 1
+    snippetMetadata[keyword].lastUsed = new Date()
+
+    log(
+      `📈 Usage count incremented for ${keyword}: ${snippetMetadata[keyword].usageCount}`
+    )
+
+    // Notify content scripts and popup about usage update
+    const usageData = {
+      keyword,
+      usageCount: snippetMetadata[keyword].usageCount,
+      lastUsed: snippetMetadata[keyword].lastUsed
+    }
+
+    // Notify popup
+    chrome.runtime
+      .sendMessage({
+        type: "USAGE_UPDATED",
+        ...usageData
+      })
+      .catch(() => {
+        // Popup might not be open, ignore errors
+      })
+
+    // Notify content scripts
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        if (tab.id) {
+          chrome.tabs
+            .sendMessage(tab.id, {
+              type: "USAGE_UPDATED",
+              ...usageData
+            })
+            .catch(() => {
+              // Tab might not have content script, ignore errors
+            })
+        }
+      })
+    })
+  } catch (error) {
+    log("❌ Error incrementing usage count:", error)
+  }
+}
+
+// Get snippets with metadata for popup
+const getSnippetsWithMetadata = () => {
+  const snippetsWithMetadata = Object.entries(userSnippets).map(
+    ([keyword, value]) => ({
+      keyword,
+      value,
+      usageCount: snippetMetadata[keyword]?.usageCount || 0,
+      lastUsed: snippetMetadata[keyword]?.lastUsed || null,
+      docId: snippetMetadata[keyword]?.docId || null
+    })
+  )
+
+  return snippetsWithMetadata
 }
 
 // Handle authentication state changes
@@ -121,8 +228,9 @@ if (auth) {
       log("👤 User authenticated:", user.email)
       userSnippets = await loadUserSnippets(user.uid)
       log("📦 Loaded snippets for user:", userSnippets)
+      log("📊 Loaded snippet metadata:", snippetMetadata)
 
-      // Notify popup about user state change
+      // Notify popup about user state change with metadata
       chrome.runtime
         .sendMessage({
           type: "USER_STATE_CHANGED",
@@ -132,7 +240,8 @@ if (auth) {
             displayName: user.displayName
           },
           isLoading: false,
-          snippets: userSnippets
+          snippets: userSnippets,
+          snippetsWithMetadata: getSnippetsWithMetadata()
         })
         .catch(() => {
           // Popup might not be open, ignore errors
@@ -150,7 +259,8 @@ if (auth) {
                   email: user.email,
                   displayName: user.displayName
                 },
-                snippets: userSnippets
+                snippets: userSnippets,
+                snippetsWithMetadata: getSnippetsWithMetadata()
               })
               .catch(() => {
                 // Tab might not have content script, ignore errors
@@ -161,6 +271,7 @@ if (auth) {
     } else {
       log("🚫 User logged out")
       userSnippets = {}
+      snippetMetadata = {}
 
       // Notify popup about user state change
       chrome.runtime
@@ -168,7 +279,8 @@ if (auth) {
           type: "USER_STATE_CHANGED",
           user: null,
           isLoading: false,
-          snippets: {}
+          snippets: {},
+          snippetsWithMetadata: []
         })
         .catch(() => {
           // Popup might not be open, ignore errors
@@ -279,7 +391,8 @@ const handleRefreshSnippets = async () => {
           chrome.tabs
             .sendMessage(tab.id, {
               type: "SNIPPETS_UPDATED",
-              snippets: userSnippets
+              snippets: userSnippets,
+              snippetsWithMetadata: getSnippetsWithMetadata()
             })
             .catch(() => {
               // Tab might not have content script, ignore errors
@@ -288,7 +401,11 @@ const handleRefreshSnippets = async () => {
       })
     })
 
-    return { success: true, snippets: userSnippets }
+    return {
+      success: true,
+      snippets: userSnippets,
+      snippetsWithMetadata: getSnippetsWithMetadata()
+    }
   } catch (error) {
     log("❌ Error refreshing snippets:", error)
     return { success: false, error: error.message }
@@ -312,19 +429,26 @@ const saveSnippetToFirebase = async (keyword: string, value: string) => {
       "items"
     )
 
-    // Add the snippet to Firebase
+    // Add the snippet to Firebase with initial usage count
     const docRef = await addDoc(userItemsRef, {
       keyword,
       value,
       userId: currentUser.uid,
+      usageCount: 0,
+      lastUsed: null,
       createdAt: new Date(),
       updatedAt: new Date()
     })
 
     log(`✅ Snippet saved to Firebase: ${keyword} -> ${value}`)
 
-    // Update local snippets
+    // Update local snippets and metadata
     userSnippets[keyword] = value
+    snippetMetadata[keyword] = {
+      docId: docRef.id,
+      usageCount: 0,
+      lastUsed: undefined
+    }
 
     // Notify content scripts about snippet update
     chrome.tabs.query({}, (tabs) => {
@@ -333,7 +457,8 @@ const saveSnippetToFirebase = async (keyword: string, value: string) => {
           chrome.tabs
             .sendMessage(tab.id, {
               type: "SNIPPETS_UPDATED",
-              snippets: userSnippets
+              snippets: userSnippets,
+              snippetsWithMetadata: getSnippetsWithMetadata()
             })
             .catch(() => {
               // Tab might not have content script, ignore errors
@@ -384,8 +509,9 @@ const deleteSnippetFromFirebase = async (keyword: string) => {
 
       log(`✅ Snippet deleted from Firebase: ${keyword}`)
 
-      // Remove from local snippets
+      // Remove from local snippets and metadata
       delete userSnippets[keyword]
+      delete snippetMetadata[keyword]
 
       // Notify content scripts about snippet update
       chrome.tabs.query({}, (tabs) => {
@@ -394,7 +520,8 @@ const deleteSnippetFromFirebase = async (keyword: string) => {
             chrome.tabs
               .sendMessage(tab.id, {
                 type: "SNIPPETS_UPDATED",
-                snippets: userSnippets
+                snippets: userSnippets,
+                snippetsWithMetadata: getSnippetsWithMetadata()
               })
               .catch(() => {
                 // Tab might not have content script, ignore errors
@@ -441,7 +568,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         user: currentUser,
         isLoading,
-        snippets: userSnippets
+        snippets: userSnippets,
+        snippetsWithMetadata: getSnippetsWithMetadata()
       })
       break
 
@@ -452,6 +580,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "GET_SNIPPETS":
       sendResponse({
         snippets: userSnippets,
+        snippetsWithMetadata: getSnippetsWithMetadata(),
         user: currentUser
       })
       break
@@ -463,6 +592,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "DELETE_SNIPPET":
       deleteSnippetFromFirebase(message.keyword).then(sendResponse)
       return true
+
+    case "INCREMENT_USAGE":
+      log("📈 Incrementing usage for keyword:", message.keyword)
+      incrementUsageCount(message.keyword)
+      sendResponse({ success: true })
+      break
+
+    case "GET_USAGE_STATS":
+      const stats = Object.entries(snippetMetadata)
+        .map(([keyword, meta]) => ({
+          keyword,
+          usageCount: meta.usageCount,
+          lastUsed: meta.lastUsed
+        }))
+        .sort((a, b) => b.usageCount - a.usageCount)
+
+      sendResponse({
+        success: true,
+        stats,
+        totalUsage: stats.reduce((sum, stat) => sum + stat.usageCount, 0)
+      })
+      break
 
     default:
       log("❓ Unknown message type:", message.type)
@@ -483,7 +634,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             email: currentUser.email,
             displayName: currentUser.displayName
           },
-          snippets: userSnippets
+          snippets: userSnippets,
+          snippetsWithMetadata: getSnippetsWithMetadata()
         })
         .catch(() => {
           // Tab might not have content script, ignore errors
@@ -493,4 +645,4 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 })
 
 // Initialize background script
-log("🚀 QuickType background script initialized")
+log("🚀 QuickType background script initialized with usage tracking")
