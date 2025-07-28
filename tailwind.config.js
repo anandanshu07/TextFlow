@@ -14,7 +14,14 @@ module.exports = {
     "./components/**/*.{js,ts,jsx,tsx}"
   ],
   theme: {
-    extend: {}
+    extend: {
+      fontFamily: {
+        figtree: ["Figtree", "sans-serif"]
+      },
+      colors: {
+        "custom-gray": "#b6b9be"
+      }
+    }
   },
   plugins: []
 }
