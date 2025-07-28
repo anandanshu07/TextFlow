@@ -1,22 +1,9 @@
-import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, updateDoc, where, type Firestore } from "firebase/firestore";
-import { LogOut, Plus, Save, Trash2, User } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import { LogOut, Plus, Save, Trash2, User } from "lucide-react"
+import React, { useEffect, useState } from "react"
 
+import "./style.css"
 
-
-
-
-
-import "./style.css";
-
-
-
-import { StatefulButton } from "~components/StatefulButton";
-import { useFirebase } from "~firebase/hook";
-
-
-
-
+import { StatefulButton } from "~components/StatefulButton"
 
 const IndexPopup = () => {
   const [items, setItems] = useState([])
@@ -28,14 +15,15 @@ const IndexPopup = () => {
   const [showLoginAnimation, setShowLoginAnimation] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const { user, isLoading, onLogin, onLogout, firestore } = useFirebase()
+  const [user, setUser] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
 
-  // Load items from Firestore when user logs in
+  // Load items from background script when user logs in
   useEffect(() => {
-    if (user && firestore) {
+    if (user) {
       loadItems()
     }
-  }, [user, firestore])
+  }, [user])
 
   // Show login animation when user logs in
   useEffect(() => {
@@ -45,47 +33,113 @@ const IndexPopup = () => {
     }
   }, [user, isLoading])
 
+  // Get user state from background script
+  useEffect(() => {
+    const getUserState = async () => {
+      try {
+        // First test if background script is working
+        const testResponse = await chrome.runtime.sendMessage({
+          type: "TEST_BACKGROUND"
+        })
+        console.log("Background script test:", testResponse)
+
+        const response = await chrome.runtime.sendMessage({ type: "GET_USER" })
+        console.log("User state response:", response)
+        setUser(response.user)
+        setIsLoading(response.isLoading)
+
+        if (response.user) {
+          // Convert snippets to items format for the UI
+          const itemsFromSnippets = Object.entries(response.snippets || {}).map(
+            ([keyword, value], index) => ({
+              id: `snippet-${index}`,
+              keyword,
+              value,
+              userId: response.user.uid,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          )
+          setItems(itemsFromSnippets)
+        }
+      } catch (error) {
+        console.error("Error getting user state:", error)
+      }
+    }
+
+    // Get initial user state only once
+    getUserState()
+
+    // Listen for user state changes from background script
+    const handleUserStateChange = (message) => {
+      if (message.type === "USER_STATE_CHANGED") {
+        console.log("User state changed:", message)
+        setUser(message.user)
+        setIsLoading(message.isLoading)
+
+        if (message.user && message.snippets) {
+          const itemsFromSnippets = Object.entries(message.snippets).map(
+            ([keyword, value], index) => ({
+              id: `snippet-${index}`,
+              keyword,
+              value,
+              userId: message.user.uid,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            })
+          )
+          setItems(itemsFromSnippets)
+        } else if (!message.user) {
+          setItems([])
+        }
+      }
+    }
+
+    chrome.runtime.onMessage.addListener(handleUserStateChange)
+
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleUserStateChange)
+    }
+  }, [])
+
   const loadItems = async () => {
-    if (!user || !firestore) return
+    if (!user) return
 
     setLoading(true)
     try {
-      const itemsCollection = collection(
-        firestore,
-        `quickTypeItems/${user.uid}/items`
-      )
-
-      const q = query(
-        itemsCollection,
-        where("userId", "==", user.uid),
-        orderBy("createdAt", "desc")
-      )
-      const querySnapshot = await getDocs(q)
-
-      const loadedItems = []
-      querySnapshot.forEach((doc) => {
-        loadedItems.push({
-          id: doc.id,
-          ...doc.data()
-        })
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_SNIPPETS"
       })
 
-      setItems(loadedItems)
+      if (response.snippets) {
+        // Convert snippets to items format for the UI
+        const itemsFromSnippets = Object.entries(response.snippets).map(
+          ([keyword, value], index) => ({
+            id: `snippet-${index}`,
+            keyword,
+            value,
+            userId: user.uid,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          })
+        )
+        setItems(itemsFromSnippets)
 
-      // If no items exist, create default ones
-      if (loadedItems.length === 0) {
-        await createDefaultItems()
+        // If no items exist, create default ones
+        if (itemsFromSnippets.length === 0) {
+          await createDefaultItems()
+        }
       }
     } catch (error) {
       console.error("Error loading items:", error)
-      alert("Error loading your items. Please try again."+ error.message || "UNKNOWN")
+      alert("Error loading your items. Please try again.")
     } finally {
       setLoading(false)
     }
   }
 
   const createDefaultItems = async () => {
-    if (!user || !firestore) return
+    if (!user) return
 
     const defaultItems = [
       { keyword: "/email", value: "john.doe@company.com" },
@@ -94,28 +148,15 @@ const IndexPopup = () => {
     ]
 
     try {
-      const itemsCollection = collection(
-        firestore,
-        `quickTypeItems/${user.uid}/items`
-      )
-      const createdItems = []
-
-      for (const item of defaultItems) {
-        const docRef = await addDoc(itemsCollection, {
-          ...item,
-          userId: user.uid,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-
-        createdItems.push({
-          id: docRef.id,
-          ...item,
-          userId: user.uid,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-      }
+      // For now, we'll just set these as local items since we don't have direct Firebase access
+      // In a real implementation, you'd send these to the background script to save to Firebase
+      const createdItems = defaultItems.map((item, index) => ({
+        id: `default-${index}`,
+        ...item,
+        userId: user.uid,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }))
 
       setItems(createdItems)
     } catch (error) {
@@ -125,7 +166,7 @@ const IndexPopup = () => {
 
   const addNewItem = () => {
     const newItem = {
-      id: null, // Will be set when saved to Firestore
+      id: null, // Will be set when saved
       keyword: "/",
       value: "",
       userId: user.uid
@@ -151,7 +192,7 @@ const IndexPopup = () => {
   }
 
   const saveCurrentItem = async () => {
-    if (!user || !firestore) return
+    if (!user) return
 
     const trimmedKeyword = keyword.trim()
     const trimmedValue = value.trim()
@@ -190,51 +231,57 @@ const IndexPopup = () => {
 
     setSaving(true)
     try {
-      const itemData = {
-        keyword: trimmedKeyword,
-        value: trimmedValue,
-        userId: user.uid,
-        updatedAt: new Date()
-      }
-
       if (isEditing) {
-        // Create new item
-        const itemsCollection = collection(
-          firestore,
-          `quickTypeItems/${user.uid}/items`
-        )
-        const docRef = await addDoc(itemsCollection, {
-          ...itemData,
-          createdAt: new Date()
+        // Create new item - send to background script
+        const response = await chrome.runtime.sendMessage({
+          type: "SAVE_SNIPPET",
+          keyword: trimmedKeyword,
+          value: trimmedValue
         })
 
-        const newItem = {
-          id: docRef.id,
-          ...itemData,
-          createdAt: new Date()
-        }
+        if (response.success) {
+          const newItem = {
+            id: response.docId || `new-${Date.now()}`,
+            keyword: trimmedKeyword,
+            value: trimmedValue,
+            userId: user.uid,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
 
-        setItems((prevItems) => [newItem, ...prevItems])
-        setSelectedItem(newItem)
+          setItems((prevItems) => [newItem, ...prevItems])
+          setSelectedItem(newItem)
+          setIsEditing(false)
+        } else {
+          alert(`Error saving item: ${response.error}`)
+        }
       } else {
-        // Update existing item
-        const itemDoc = doc(firestore, "quickTypeItems", selectedItem.id)
-        await updateDoc(itemDoc, itemData)
+        // Update existing item - send to background script
+        const response = await chrome.runtime.sendMessage({
+          type: "SAVE_SNIPPET",
+          keyword: trimmedKeyword,
+          value: trimmedValue
+        })
 
-        const updatedItem = {
-          ...selectedItem,
-          ...itemData
-        }
+        if (response.success) {
+          const updatedItem = {
+            ...selectedItem,
+            keyword: trimmedKeyword,
+            value: trimmedValue,
+            updatedAt: new Date()
+          }
 
-        setItems((prevItems) =>
-          prevItems.map((item) =>
-            item.id === selectedItem.id ? updatedItem : item
+          setItems((prevItems) =>
+            prevItems.map((item) =>
+              item.id === selectedItem.id ? updatedItem : item
+            )
           )
-        )
-        setSelectedItem(updatedItem)
+          setSelectedItem(updatedItem)
+          setIsEditing(false)
+        } else {
+          alert(`Error updating item: ${response.error}`)
+        }
       }
-
-      setIsEditing(false)
     } catch (error) {
       console.error("Error saving item:", error)
       alert("Error saving item. Please try again.")
@@ -244,7 +291,7 @@ const IndexPopup = () => {
   }
 
   const deleteItem = async (itemToDelete) => {
-    if (!user || !firestore) return
+    if (!user) return
 
     // Add to deleting set for animation
     setDeletingItems((prev) => new Set(prev).add(itemToDelete.id))
@@ -252,19 +299,25 @@ const IndexPopup = () => {
     // Wait for animation
     setTimeout(async () => {
       try {
-        // Delete from Firestore
-        const itemDoc = doc(firestore, "quickTypeItems", itemToDelete.id)
-        await deleteDoc(itemDoc)
+        // Send delete request to background script
+        const response = await chrome.runtime.sendMessage({
+          type: "DELETE_SNIPPET",
+          keyword: itemToDelete.keyword
+        })
 
-        // Update local state
-        setItems((prevItems) =>
-          prevItems.filter((item) => item.id !== itemToDelete.id)
-        )
+        if (response.success) {
+          // Update local state
+          setItems((prevItems) =>
+            prevItems.filter((item) => item.id !== itemToDelete.id)
+          )
 
-        if (selectedItem && selectedItem.id === itemToDelete.id) {
-          setSelectedItem(null)
-          setKeyword("/")
-          setValue("")
+          if (selectedItem && selectedItem.id === itemToDelete.id) {
+            setSelectedItem(null)
+            setKeyword("/")
+            setValue("")
+          }
+        } else {
+          alert(`Error deleting item: ${response.error}`)
         }
       } catch (error) {
         console.error("Error deleting item:", error)
@@ -278,6 +331,63 @@ const IndexPopup = () => {
         })
       }
     }, 300)
+  }
+
+  const onLogin = async () => {
+    setIsLoading(true)
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "LOGIN" })
+      if (response.success) {
+        console.log("Login successful, refreshing user state...")
+        // Immediately get updated user state
+        const userResponse = await chrome.runtime.sendMessage({
+          type: "GET_USER"
+        })
+        console.log("Updated user state:", userResponse)
+        setUser(userResponse.user)
+        setIsLoading(userResponse.isLoading)
+
+        if (userResponse.user) {
+          // Convert snippets to items format for the UI
+          const itemsFromSnippets = Object.entries(
+            userResponse.snippets || {}
+          ).map(([keyword, value], index) => ({
+            id: `snippet-${index}`,
+            keyword,
+            value,
+            userId: userResponse.user.uid,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }))
+          setItems(itemsFromSnippets)
+        }
+      } else {
+        alert(`Login failed: ${response.error}`)
+      }
+    } catch (error) {
+      console.error("Login error:", error)
+      alert("Login failed. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const onLogout = async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "LOGOUT" })
+      if (response.success) {
+        setUser(null)
+        setItems([])
+        setSelectedItem(null)
+        setKeyword("/")
+        setValue("")
+      } else {
+        alert(`Logout failed: ${response.error}`)
+      }
+    } catch (error) {
+      console.error("Logout error:", error)
+      alert("Logout failed. Please try again.")
+    }
   }
 
   if (!user) {
@@ -436,10 +546,7 @@ const IndexPopup = () => {
                         Saving...
                       </>
                     ) : (
-                      <>
-                        
-                        Save Changes
-                      </>
+                      <>Save Changes</>
                     )}
                   </StatefulButton>
                 )}

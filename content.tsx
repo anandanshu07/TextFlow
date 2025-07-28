@@ -1,20 +1,9 @@
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-
-
-
-import { useFirebase } from "~firebase/hook";
-
-
-
-
+import React, { useEffect, useRef, useState } from "react"
+import { createRoot } from "react-dom/client"
 
 // Global state for snippets
 let globalSnippets: Record<string, string> = {
-  "/email": "deevee47@gmail.com",
-  "/phone": "+91-9876543210",
-  "/name": "Divyansh Vishwakarma"
+  "/email": "Please Login Quick Type Chrome Extension",
 }
 
 // Enhanced logging function
@@ -24,231 +13,113 @@ const log = (message: string, data?: any) => {
 
 // Main Content Script Component
 const QuickTypeContent = () => {
-  const { user, isLoading, firestore } = useFirebase()
   const [snippets, setSnippets] = useState(globalSnippets)
   const [isInitialized, setIsInitialized] = useState(false)
+  const [user, setUser] = useState(null)
   const inputTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<MutationObserver | null>(null)
   const focusedElementRef = useRef<HTMLElement | null>(null)
 
-  // Load snippets from Firebase
-  const loadSnippetsFromFirebase = async () => {
-    if (!user || !firestore) {
-      log("❌ Cannot load snippets - missing user or firestore", {
-        user: !!user,
-        firestore: !!firestore
-      })
-      return
-    }
-
+  // Load snippets from background script
+  const loadSnippetsFromBackground = async () => {
     try {
-      console.log("📥 Loading snippets from Firebase for user:", user.email)
-      console.log("🔍 User UID:", user.uid)
+      log("📥 Loading snippets from background script")
 
-      const userItemsRef = collection(
-        firestore,
-        "quickTypeItems",
-        user.uid,
-        "items"
-      )
+      const response = await chrome.runtime.sendMessage({
+        type: "GET_SNIPPETS"
+      })
 
-      console.log("📂 Collection path:", `quickTypeItems/${user.uid}/items`)
-
-      // Try multiple approaches to find the data
-      let items: any[] = []
-
-      // Approach 1: Simple collection fetch (most reliable)
-      try {
-        console.log("🔍 Trying simple collection fetch...")
-        const snapshot = await getDocs(userItemsRef)
-        console.log(`📄 Found ${snapshot.size} documents in collection`)
-
-        if (!snapshot.empty) {
-          items = snapshot.docs.map((doc) => {
-            const data = doc.data()
-            console.log(`📝 Document ${doc.id}:`, data)
-            return {
-              id: doc.id,
-              ...data
-            }
-          })
-          console.log("✅ Raw items from simple fetch:", items)
-        }
-      } catch (simpleError) {
-        console.log("❌ Simple fetch failed:", simpleError)
-      }
-
-      // Approach 2: Try with query if simple fetch didn't work or returned empty
-      if (items.length === 0) {
-        try {
-          log("🔍 Trying query with where clause...")
-          const q = query(
-            userItemsRef,
-            where("userId", "==", user.uid),
-            orderBy("createdAt", "desc")
-          )
-          const snapshot = await getDocs(q)
-          log(`📄 Query found ${snapshot.size} documents`)
-
-          if (!snapshot.empty) {
-            items = snapshot.docs.map((doc) => {
-              const data = doc.data()
-              log(`📝 Query document ${doc.id}:`, data)
-              return {
-                id: doc.id,
-                ...data
-              }
-            })
-            log("✅ Raw items from query:", items)
-          }
-        } catch (queryError) {
-          log("❌ Query failed:", queryError)
-        }
-      }
-
-      // Approach 3: Try different collection structures
-      if (items.length === 0) {
-        try {
-          log("🔍 Trying alternative collection structure...")
-          const altRef = collection(firestore, "quickTypeItems")
-          const altQuery = query(altRef, where("userId", "==", user.uid))
-          const snapshot = await getDocs(altQuery)
-          log(`📄 Alternative structure found ${snapshot.size} documents`)
-
-          if (!snapshot.empty) {
-            items = snapshot.docs.map((doc) => {
-              const data = doc.data()
-              log(`📝 Alt document ${doc.id}:`, data)
-              return {
-                id: doc.id,
-                ...data
-              }
-            })
-            log("✅ Raw items from alternative structure:", items)
-          }
-        } catch (altError) {
-          log("❌ Alternative structure failed:", altError)
-        }
-      }
-
-      if (items.length > 0) {
-        console.log(`🎉 Successfully loaded ${items.length} items from Firebase`)
-        updateSnippetsFromItems(items)
+      if (response.snippets && Object.keys(response.snippets).length > 0) {
+        log("✅ Snippets loaded from background:", response.snippets)
+        globalSnippets = response.snippets
+        setSnippets(response.snippets)
       } else {
-        log(
-          "ℹ️ No Firebase snippets found in any structure, keeping current snippets"
-        )
-        log("💡 Current snippets will remain:", snippets)
+        log("ℹ️ No snippets from background, keeping defaults")
       }
     } catch (error) {
-      console.log("❌ Error loading snippets from Firebase:", error)
-      log("📊 Error details:", {
-        name: error.name,
-        message: error.message,
-        code: error.code
-      })
+      log("❌ Error loading snippets from background:", error)
     }
   }
 
-  // Update snippets from Firebase items
-  const updateSnippetsFromItems = (items: any[]) => {
-    log("🔄 Processing Firebase items to update snippets...")
-    log("📥 Raw items received:", items)
+  // Get user state from background script
+  const getUserState = async () => {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "GET_USER" })
+      setUser(response.user)
 
-    // Start with current snippets (including hardcoded defaults)
-    const newSnippets: Record<string, string> = { ...globalSnippets }
-    log("📋 Starting with current snippets:", newSnippets)
-
-    let processedCount = 0
-
-    items.forEach((item: any, index: number) => {
-      log(`📝 Processing item ${index + 1}:`, item)
-
-      // Try different possible field names for keyword and value
-      const possibleKeywordFields = ["keyword", "shortcut", "trigger", "key"]
-      const possibleValueFields = [
-        "value",
-        "text",
-        "content",
-        "replacement",
-        "expansion"
-      ]
-
-      let keyword = null
-      let value = null
-
-      // Find keyword field
-      for (const field of possibleKeywordFields) {
-        if (item[field]) {
-          keyword = item[field]
-          log(`✅ Found keyword in field '${field}':`, keyword)
-          break
+      if (response.user) {
+        log("👤 User authenticated:", response.user.email)
+        if (response.snippets && Object.keys(response.snippets).length > 0) {
+          log("✅ User snippets loaded:", response.snippets)
+          globalSnippets = response.snippets
+          setSnippets(response.snippets)
         }
-      }
-
-      // Find value field
-      for (const field of possibleValueFields) {
-        if (item[field]) {
-          value = item[field]
-          log(`✅ Found value in field '${field}':`, value)
-          break
-        }
-      }
-
-      if (keyword && value) {
-        // Ensure keyword starts with / if it doesn't already
-        const formattedKeyword = keyword.startsWith("/")
-          ? keyword
-          : `/${keyword}`
-
-        newSnippets[formattedKeyword] = value
-        processedCount++
-        log(`✅ Added snippet: "${formattedKeyword}" -> "${value}"`)
       } else {
-        log(`⚠️ Skipping item ${index + 1} - missing required fields`, {
-          keyword: keyword,
-          value: value,
-          availableFields: Object.keys(item)
-        })
+        log("🚫 No user logged in")
       }
-    })
-
-    log(`🎯 Processed ${processedCount} out of ${items.length} items`)
-    log("📊 Final snippets object:", newSnippets)
-
-    // Update global and component state
-    globalSnippets = newSnippets
-    setSnippets(newSnippets)
-
-    log("✅ Snippets updated successfully!")
-    log(`📈 Total snippets now: ${Object.keys(newSnippets).length}`)
+    } catch (error) {
+      log("❌ Error getting user state:", error)
+    }
   }
 
-  // Initialize when user changes
+  // Initialize when component mounts
   useEffect(() => {
-    log("🔄 Initialization effect triggered", {
-      isLoading,
-      user: !!user,
-      firestore: !!firestore
-    })
+    log("🔄 Initializing QuickType content script")
 
-    if (!isLoading) {
-      if (user && firestore) {
-        log("👤 User authenticated, loading snippets...")
-        loadSnippetsFromFirebase()
-        setIsInitialized(true)
-      } else if (user === null) {
-        log("🚫 User logged out, using default snippets")
-        globalSnippets = {
-          "/email": "deevee47@gmail.com",
-          "/phone": "+91-9876543210",
-          "/name": "Divyansh Vishwakarma"
-        }
-        setSnippets(globalSnippets)
-        setIsInitialized(true)
+    // Get initial user state
+    getUserState()
+
+    // Listen for messages from background script
+    const handleMessage = (message: any) => {
+      log("📨 Message received from background:", message.type)
+
+      switch (message.type) {
+        case "USER_LOGIN":
+          log("👤 User login message received")
+          setUser(message.user)
+          if (message.snippets) {
+            log("✅ User snippets received:", message.snippets)
+            globalSnippets = message.snippets
+            setSnippets(message.snippets)
+          }
+          break
+
+        case "USER_LOGOUT":
+          log("🚫 User logout message received")
+          setUser(null)
+          // Reset to default snippets
+          globalSnippets = {
+            "/email": "deevee47@gmail.com",
+            "/phone": "+91-9876543210",
+            "/name": "Divyansh Vishwakarma"
+          }
+          setSnippets(globalSnippets)
+          break
+
+        case "SNIPPETS_UPDATED":
+          log("🔄 Snippets updated message received")
+          if (message.snippets) {
+            globalSnippets = message.snippets
+            setSnippets(message.snippets)
+          }
+          break
+
+        default:
+          log("❓ Unknown message type:", message.type)
       }
     }
-  }, [user, isLoading, firestore])
+
+    // Add message listener
+    chrome.runtime.onMessage.addListener(handleMessage)
+
+    // Mark as initialized
+    setIsInitialized(true)
+
+    return () => {
+      // Cleanup message listener
+      chrome.runtime.onMessage.removeListener(handleMessage)
+    }
+  }, [])
 
   // Toast notification system
   const createToast = (message: string) => {
@@ -727,10 +598,8 @@ const QuickTypeContent = () => {
     ;(window as any).quickTypeDebug = () => {
       console.group("🐛 QuickType Debug Info")
       console.log("- Initialized:", isInitialized)
-      console.log("- Loading:", isLoading)
       console.log("- Current user:", user?.email || "Not logged in")
       console.log("- Current snippets:", snippets)
-      console.log("- Firestore:", !!firestore)
       console.log("- Global snippets:", globalSnippets)
       console.log("- Currently focused element:", focusedElementRef.current)
 
@@ -785,113 +654,20 @@ const QuickTypeContent = () => {
       }, 15000)
     }
     ;(window as any).quickTypeReload = () => {
-      if (user && firestore) {
-        log("🔄 Manually reloading snippets...")
-        loadSnippetsFromFirebase()
-      } else {
-        log("❌ No user logged in")
-      }
+      log("🔄 Manually reloading snippets...")
+      loadSnippetsFromBackground()
     }
     ;(window as any).quickTypeStatus = () => {
       return {
         initialized: isInitialized,
-        loading: isLoading,
         user: user?.email || null,
         snippetsCount: Object.keys(snippets).length,
         snippets: snippets,
-        hasFirestore: !!firestore,
         focusedElement: focusedElementRef.current?.tagName || null,
         totalInputsOnPage: document.querySelectorAll(
           'input, textarea, [contenteditable="true"], [contenteditable=""]'
         ).length
       }
-    }
-    ;(window as any).quickTypeFirebaseTest = async () => {
-      if (!user || !firestore) {
-        console.log("❌ No user or firestore available")
-        return
-      }
-
-      console.group("🔥 Firebase Test Results")
-
-      try {
-        // Test 1: Check user info
-        console.log("👤 User info:", {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName
-        })
-
-        // Test 2: Try to read from different possible collection structures
-        const structures = [
-          `quickTypeItems/${user.uid}/items`,
-          `quickTypeItems`,
-          `users/${user.uid}/snippets`,
-          `users/${user.uid}/quicktype`,
-          `snippets`
-        ]
-
-        for (const structure of structures) {
-          try {
-            console.log(`🔍 Testing structure: ${structure}`)
-
-            let ref
-            let query_ref = null
-
-            if (structure.includes("/")) {
-              const parts = structure.split("/")
-              if (parts.length === 3) {
-                ref = collection(firestore, parts[0], parts[1], parts[2])
-              } else {
-                ref = collection(firestore, structure)
-              }
-            } else {
-              ref = collection(firestore, structure)
-              // For top-level collections, try with userId filter
-              query_ref = query(ref, where("userId", "==", user.uid))
-            }
-
-            // Try simple fetch first
-            const snapshot = await getDocs(ref)
-            console.log(
-              `📄 ${structure} - Simple fetch: ${snapshot.size} documents`
-            )
-
-            if (snapshot.size > 0) {
-              snapshot.docs.forEach((doc, index) => {
-                console.log(`  Document ${index + 1} (${doc.id}):`, doc.data())
-              })
-            }
-
-            // Try with query if available
-            if (query_ref) {
-              const querySnapshot = await getDocs(query_ref)
-              console.log(
-                `📄 ${structure} - With userId query: ${querySnapshot.size} documents`
-              )
-
-              if (querySnapshot.size > 0) {
-                querySnapshot.docs.forEach((doc, index) => {
-                  console.log(
-                    `  Query Document ${index + 1} (${doc.id}):`,
-                    doc.data()
-                  )
-                })
-              }
-            }
-          } catch (structureError) {
-            console.log(`❌ ${structure} failed:`, structureError.message)
-          }
-        }
-
-        // Test 3: Manual reload
-        console.log("🔄 Attempting manual reload...")
-        await loadSnippetsFromFirebase()
-      } catch (error) {
-        console.error("❌ Firebase test failed:", error)
-      }
-
-      console.groupEnd()
     }
     ;(window as any).quickTypeManualAdd = (keyword: string, value: string) => {
       const formattedKeyword = keyword.startsWith("/") ? keyword : `/${keyword}`
@@ -902,13 +678,13 @@ const QuickTypeContent = () => {
     }
 
     // Auto-run debug on initialization
-    if (isInitialized && !isLoading) {
+    if (isInitialized) {
       log("✅ QuickType fully initialized with comprehensive detection!")
       setTimeout(() => {
         ;(window as any).quickTypeDebug()
       }, 1000)
     }
-  }, [user, firestore, snippets, isInitialized, isLoading])
+  }, [user, snippets, isInitialized])
 
   return null
 }
@@ -936,7 +712,7 @@ const init = () => {
     log("  - quickTypeDebug() - Show debug info and count inputs")
     log("  - quickTypeTest() - Create test input with auto-typing")
     log("  - quickTypeStatus() - Get current status")
-    log("  - quickTypeForceProcess() - Force process active element")
+    log("  - quickTypeReload() - Reload snippets from background")
   } catch (error) {
     log("❌ Error initializing QuickType:", error)
   }
