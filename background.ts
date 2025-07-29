@@ -213,7 +213,7 @@ const checkExistingAuth = async (): Promise<boolean> => {
           resolve(false)
         }
       })
-      
+
       // Shorter timeout for service worker context
       setTimeout(() => {
         unsubscribe()
