@@ -17,11 +17,13 @@ const QuickTypeContent = () => {
   const [isInitialized, setIsInitialized] = useState(false)
   const [user, setUser] = useState(null)
   const [usageCounts, setUsageCounts] = useState<Record<string, number>>({})
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true) // Add auth checking state
   const usageCountsRef = useRef<Record<string, number>>({}) // Immediate reference for usage counts
   const inputTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const observerRef = useRef<MutationObserver | null>(null)
   const focusedElementRef = useRef<HTMLElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const authCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Sync usageCountsRef with usageCounts state
   useEffect(() => {
@@ -73,11 +75,14 @@ const QuickTypeContent = () => {
     }
   }
 
-  // Get user state from background script
-  const getUserState = async () => {
+  // Get user state from background script with retry mechanism
+  const getUserState = async (retryCount = 0) => {
     try {
+      log(`🔍 Getting user state (attempt ${retryCount + 1})`)
       const response = await chrome.runtime.sendMessage({ type: "GET_USER" })
+
       setUser(response.user)
+      setIsCheckingAuth(false)
 
       if (response.user) {
         log("👤 User authenticated:", response.user.email)
@@ -99,17 +104,39 @@ const QuickTypeContent = () => {
         }
       } else {
         log("🚫 No user logged in")
+        // If no user and we haven't retried enough, try again after a delay
+        // This helps catch cases where the background script is still initializing
+        if (retryCount < 3) {
+          log(
+            `⏳ Retrying user state check in 2 seconds... (${retryCount + 1}/3)`
+          )
+          authCheckTimeoutRef.current = setTimeout(() => {
+            getUserState(retryCount + 1)
+          }, 2000)
+          return // Don't set isCheckingAuth to false yet
+        }
       }
     } catch (error) {
       log("❌ Error getting user state:", error)
+      setIsCheckingAuth(false)
+
+      // Retry on error too, but only a few times
+      if (retryCount < 2) {
+        log(`⏳ Retrying after error in 3 seconds... (${retryCount + 1}/2)`)
+        authCheckTimeoutRef.current = setTimeout(() => {
+          getUserState(retryCount + 1)
+        }, 3000)
+      }
     }
   }
 
   // Initialize when component mounts
   useEffect(() => {
-    log("🔄 Initializing QuickType content script")
+    log(
+      "🔄 Initializing QuickType content script with persistent login support"
+    )
 
-    // Get initial user state
+    // Get initial user state with retry mechanism
     getUserState()
 
     // Listen for messages from background script
@@ -120,6 +147,7 @@ const QuickTypeContent = () => {
         case "USER_LOGIN":
           log("👤 User login message received")
           setUser(message.user)
+          setIsCheckingAuth(false)
           if (message.snippets) {
             log("✅ User snippets received:", message.snippets)
             globalSnippets = message.snippets
@@ -141,13 +169,42 @@ const QuickTypeContent = () => {
         case "USER_LOGOUT":
           log("🚫 User logout message received")
           setUser(null)
+          setIsCheckingAuth(false)
           // Reset to default snippets
           globalSnippets = {
-            "/email": "deevee47@gmail.com",
-            "/phone": "+91-9876543210",
-            "/name": "Divyansh Vishwakarma"
+            "/email": "Please Login Quick Type Chrome Extension"
           }
           setSnippets(globalSnippets)
+          setUsageCounts({})
+          usageCountsRef.current = {}
+          break
+
+        case "USER_STATE_CHANGED":
+          log("🔄 User state changed message received")
+          setUser(message.user)
+          setIsCheckingAuth(false)
+          if (message.user && message.snippets) {
+            globalSnippets = message.snippets
+            setSnippets(message.snippets)
+
+            if (message.snippetsWithMetadata) {
+              const usageData: Record<string, number> = {}
+              message.snippetsWithMetadata.forEach((item: any) => {
+                usageData[item.keyword] = item.usageCount || 0
+              })
+              setUsageCounts(usageData)
+              usageCountsRef.current = usageData
+              log("📊 State change usage counts loaded:", usageData)
+            }
+          } else if (!message.user) {
+            // User logged out
+            globalSnippets = {
+              "/email": "Please Login Quick Type Chrome Extension"
+            }
+            setSnippets(globalSnippets)
+            setUsageCounts({})
+            usageCountsRef.current = {}
+          }
           break
 
         case "SNIPPETS_UPDATED":
@@ -198,8 +255,11 @@ const QuickTypeContent = () => {
     setIsInitialized(true)
 
     return () => {
-      // Cleanup message listener
+      // Cleanup message listener and timeouts
       chrome.runtime.onMessage.removeListener(handleMessage)
+      if (authCheckTimeoutRef.current) {
+        clearTimeout(authCheckTimeoutRef.current)
+      }
     }
   }, [])
 
@@ -902,9 +962,12 @@ const QuickTypeContent = () => {
     ;(window as any).quickTypeDebug = () => {
       console.group("🐛 QuickType Debug Info")
       console.log("- Initialized:", isInitialized)
+      console.log("- Checking auth:", isCheckingAuth)
       console.log("- Current user:", user?.email || "Not logged in")
       console.log("- Current snippets:", snippets)
       console.log("- Global snippets:", globalSnippets)
+      console.log("- Usage counts:", usageCounts)
+      console.log("- Usage counts ref:", usageCountsRef.current)
       console.log("- Currently focused element:", focusedElementRef.current)
       console.log(
         "- Audio context:",
@@ -976,6 +1039,7 @@ const QuickTypeContent = () => {
     ;(window as any).quickTypeStatus = () => {
       return {
         initialized: isInitialized,
+        checkingAuth: isCheckingAuth,
         user: user?.email || null,
         snippetsCount: Object.keys(snippets).length,
         snippets: snippets,
@@ -995,15 +1059,63 @@ const QuickTypeContent = () => {
       console.log(`✅ Manually added: ${formattedKeyword} -> ${value}`)
       console.log("Current snippets:", globalSnippets)
     }
+    ;(window as any).quickTypeDebugStorage = async () => {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "DEBUG_STORAGE"
+        })
+        console.group("🗄️ QuickType Storage Debug")
+        console.log("Storage response:", response)
+        console.log("Has OAuth token:", response.hasOAuthToken)
+        console.log("Token expiry:", response.tokenExpiry)
+        console.log("Is token valid:", response.isTokenValid)
+        console.log("All stored items:", response.storedItems)
+        console.groupEnd()
+        return response
+      } catch (error) {
+        console.error("❌ Storage debug failed:", error)
+      }
+    }
+    ;(window as any).quickTypeClearStorage = async () => {
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "CLEAR_STORAGE"
+        })
+        console.log("🗑️ Storage cleared:", response)
+        return response
+      } catch (error) {
+        console.error("❌ Clear storage failed:", error)
+      }
+    }
+    ;(window as any).quickTypeTestLogin = async () => {
+      try {
+        console.log("🧪 Testing login...")
+        const response = await chrome.runtime.sendMessage({ type: "LOGIN" })
+        console.log("Login response:", response)
+        return response
+      } catch (error) {
+        console.error("❌ Login test failed:", error)
+      }
+    }
+    ;(window as any).quickTypeTestLogout = async () => {
+      try {
+        console.log("🧪 Testing logout...")
+        const response = await chrome.runtime.sendMessage({ type: "LOGOUT" })
+        console.log("Logout response:", response)
+        return response
+      } catch (error) {
+        console.error("❌ Logout test failed:", error)
+      }
+    }
 
     // Auto-run debug on initialization
-    if (isInitialized) {
-      log("✅ QuickType fully initialized with comprehensive detection!")
+    if (isInitialized && !isCheckingAuth) {
+      log("✅ QuickType fully initialized with persistent login support!")
       setTimeout(() => {
         ;(window as any).quickTypeDebug()
       }, 1000)
     }
-  }, [user, snippets, isInitialized])
+  }, [user, snippets, isInitialized, isCheckingAuth])
 
   return null
 }
@@ -1034,6 +1146,10 @@ const init = () => {
     log("  - quickTypeTestSound() - Test notification sound")
     log("  - quickTypeStatus() - Get current status")
     log("  - quickTypeReload() - Reload snippets from background")
+    log("  - quickTypeDebugStorage() - Debug storage and token status")
+    log("  - quickTypeClearStorage() - Clear stored tokens")
+    log("  - quickTypeTestLogin() - Test login functionality")
+    log("  - quickTypeTestLogout() - Test logout functionality")
   } catch (error) {
     log("❌ Error initializing QuickType:", error)
   }

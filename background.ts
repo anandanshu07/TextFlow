@@ -2,9 +2,7 @@ import { initializeApp } from "firebase/app"
 import {
   getAuth,
   GoogleAuthProvider,
-  inMemoryPersistence,
   onAuthStateChanged,
-  setPersistence,
   signInWithCredential,
   signOut
 } from "firebase/auth"
@@ -48,12 +46,184 @@ try {
   auth = getAuth(app)
   firestore = getFirestore(app)
 
-  // Set persistence - use inMemoryPersistence for background script
-  setPersistence(auth, inMemoryPersistence)
-
+  // Don't set persistence in background script - handle it manually with Chrome storage
   log("✅ Firebase initialized successfully")
 } catch (error) {
   log("❌ Firebase initialization failed:", error)
+}
+
+// OAuth token storage keys
+const OAUTH_TOKEN_KEY = "quicktype_oauth_token"
+const TOKEN_EXPIRY_KEY = "quicktype_token_expiry"
+const REFRESH_TOKEN_KEY = "quicktype_refresh_token"
+
+// Store OAuth token with expiry
+const storeOAuthToken = async (token: string) => {
+  try {
+    // Calculate expiry time (50 minutes from now, tokens usually expire in 1 hour)
+    const expiryTime = Date.now() + 50 * 60 * 1000
+
+    await chrome.storage.local.set({
+      [OAUTH_TOKEN_KEY]: token,
+      [TOKEN_EXPIRY_KEY]: expiryTime
+    })
+
+    log("✅ OAuth token stored successfully")
+  } catch (error) {
+    log("❌ Error storing OAuth token:", error)
+  }
+}
+
+// Retrieve stored OAuth token
+const getStoredOAuthToken = async (): Promise<string | null> => {
+  try {
+    const result = await chrome.storage.local.get([
+      OAUTH_TOKEN_KEY,
+      TOKEN_EXPIRY_KEY
+    ])
+    const token = result[OAUTH_TOKEN_KEY]
+    const expiry = result[TOKEN_EXPIRY_KEY]
+
+    if (!token || !expiry) {
+      log("ℹ️ No stored OAuth token found")
+      return null
+    }
+
+    // Check if token is expired
+    if (Date.now() > expiry) {
+      log("⏰ Stored OAuth token has expired, attempting refresh...")
+
+      // Try to get a fresh token without user interaction
+      const refreshedToken = await refreshOAuthToken()
+      if (refreshedToken) {
+        return refreshedToken
+      }
+
+      // If refresh fails, clear the expired token
+      await clearStoredOAuthToken()
+      return null
+    }
+
+    log("✅ Valid stored OAuth token found")
+    return token
+  } catch (error) {
+    log("❌ Error retrieving stored OAuth token:", error)
+    return null
+  }
+}
+
+// Refresh OAuth token silently
+const refreshOAuthToken = async (): Promise<string | null> => {
+  try {
+    if (!chrome.identity) {
+      log("❌ Chrome identity API not available for token refresh")
+      return null
+    }
+
+    log("🔄 Attempting to refresh OAuth token...")
+
+    return new Promise((resolve) => {
+      // Try to get a token without user interaction
+      chrome.identity.getAuthToken({ interactive: false }, async (token) => {
+        if (chrome.runtime.lastError) {
+          log("❌ Token refresh failed:", chrome.runtime.lastError.message)
+          resolve(null)
+          return
+        }
+
+        if (!token) {
+          log("❌ No token received during refresh")
+          resolve(null)
+          return
+        }
+
+        log("✅ Token refreshed successfully")
+        await storeOAuthToken(token)
+        resolve(token)
+      })
+    })
+  } catch (error) {
+    log("❌ Error during token refresh:", error)
+    return null
+  }
+}
+
+// Clear stored OAuth token
+const clearStoredOAuthToken = async () => {
+  try {
+    await chrome.storage.local.remove([
+      OAUTH_TOKEN_KEY,
+      TOKEN_EXPIRY_KEY,
+      REFRESH_TOKEN_KEY
+    ])
+    log("✅ Stored OAuth token cleared")
+  } catch (error) {
+    log("❌ Error clearing stored OAuth token:", error)
+  }
+}
+
+// Try to authenticate with stored token
+const tryAuthWithStoredToken = async (): Promise<boolean> => {
+  try {
+    const storedToken = await getStoredOAuthToken()
+
+    if (!storedToken || !auth) {
+      return false
+    }
+
+    log("🔄 Attempting authentication with stored token")
+
+    const credential = GoogleAuthProvider.credential(null, storedToken)
+    await signInWithCredential(auth, credential)
+
+    log("✅ Successfully authenticated with stored token")
+    return true
+  } catch (error) {
+    log("❌ Failed to authenticate with stored token:", error)
+    // Clear invalid token
+    await clearStoredOAuthToken()
+    return false
+  }
+}
+
+// Check if user is already authenticated
+const checkExistingAuth = async (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (!auth) {
+      resolve(false)
+      return
+    }
+
+    // In service worker context, we need to be more careful with auth state
+    try {
+      // Check current user directly first
+      if (auth.currentUser) {
+        log("✅ Existing Firebase auth found:", auth.currentUser.email)
+        resolve(true)
+        return
+      }
+
+      // Fallback to auth state change listener with shorter timeout
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        unsubscribe() // Immediately unsubscribe after first check
+        if (user) {
+          log("✅ Auth state change detected user:", user.email)
+          resolve(true)
+        } else {
+          resolve(false)
+        }
+      })
+      
+      // Shorter timeout for service worker context
+      setTimeout(() => {
+        unsubscribe()
+        resolve(false)
+      }, 2000)
+    } catch (error) {
+      log("❌ Error checking existing auth:", error)
+      resolve(false)
+    }
+  })
 }
 
 // Global state
@@ -322,9 +492,26 @@ const handleLogin = async () => {
       throw new Error("Firebase not properly initialized")
     }
 
+    // First, check if we already have an authenticated user in Firebase
+    const hasExistingAuth = await checkExistingAuth()
+    if (hasExistingAuth) {
+      isLoading = false
+      log("✅ Already authenticated in Firebase")
+      return { success: true, alreadyAuthenticated: true }
+    }
+
+    // Try to authenticate with stored token
+    const storedAuthSuccess = await tryAuthWithStoredToken()
+    if (storedAuthSuccess) {
+      isLoading = false
+      return { success: true, usedStoredToken: true }
+    }
+
     if (!chrome.identity) {
       throw new Error("Chrome identity API not available")
     }
+
+    log("🔄 Requesting new OAuth token from Chrome Identity...")
 
     return new Promise((resolve) => {
       chrome.identity.getAuthToken({ interactive: true }, async (token) => {
@@ -338,12 +525,19 @@ const handleLogin = async () => {
           }
 
           log("✅ Token received, creating Firebase credential")
+
+          // Store the token for future use
+          await storeOAuthToken(token)
+
+          if (!auth) {
+            throw new Error("Firebase auth not available during sign in")
+          }
+
           const credential = GoogleAuthProvider.credential(null, token)
           await signInWithCredential(auth, credential)
 
           log("✅ Firebase sign in successful")
-          log("✅ Current user after sign in:", currentUser)
-          resolve({ success: true })
+          resolve({ success: true, usedStoredToken: false })
         } catch (error) {
           log("❌ Login failed:", error)
           resolve({ success: false, error: error.message })
@@ -365,7 +559,27 @@ const handleLogout = async () => {
     if (!auth) {
       throw new Error("Firebase auth not available")
     }
+
+    // Clear stored OAuth token
+    await clearStoredOAuthToken()
+
+    // Remove cached token from Chrome Identity
+    if (chrome.identity && chrome.identity.removeCachedAuthToken) {
+      try {
+        const token = await getStoredOAuthToken()
+        if (token) {
+          chrome.identity.removeCachedAuthToken({ token }, () => {
+            log("✅ Cached auth token removed from Chrome Identity")
+          })
+        }
+      } catch (error) {
+        log("⚠️ Could not remove cached auth token:", error)
+      }
+    }
+
+    // Sign out from Firebase
     await signOut(auth)
+
     log("✅ Logout successful")
     return { success: true }
   } catch (error) {
@@ -615,6 +829,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       break
 
+    case "DEBUG_STORAGE":
+      log("🐛 Debug storage request received")
+      chrome.storage.local.get(null, (items) => {
+        log("📦 All stored items:", items)
+        sendResponse({
+          success: true,
+          storedItems: items,
+          hasOAuthToken: !!items[OAUTH_TOKEN_KEY],
+          tokenExpiry: items[TOKEN_EXPIRY_KEY]
+            ? new Date(items[TOKEN_EXPIRY_KEY]).toISOString()
+            : null,
+          isTokenValid: items[TOKEN_EXPIRY_KEY]
+            ? Date.now() < items[TOKEN_EXPIRY_KEY]
+            : false
+        })
+      })
+      return true
+
+    case "CLEAR_STORAGE":
+      log("🗑️ Clear storage request received")
+      clearStoredOAuthToken().then(() => {
+        sendResponse({ success: true, message: "Storage cleared successfully" })
+      })
+      return true
+
     default:
       log("❓ Unknown message type:", message.type)
       sendResponse({ error: "Unknown message type" })
@@ -644,5 +883,58 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 })
 
-// Initialize background script
-log("🚀 QuickType background script initialized with usage tracking")
+// Initialize background script with auto-login attempt
+log("🚀 QuickType background script initialized with persistent login")
+
+// Try to auto-login on startup with multiple strategies
+// Use a longer delay for service worker context to ensure everything is ready
+const attemptAutoLogin = async () => {
+  try {
+    if (!currentUser && !isLoading && auth && firestore) {
+      log("🔄 Attempting auto-login with multiple strategies...")
+
+      // Strategy 1: Check existing Firebase auth state
+      const hasExistingAuth = await checkExistingAuth()
+      if (hasExistingAuth) {
+        log("✅ Auto-login successful via existing Firebase auth")
+        return
+      }
+
+      // Strategy 2: Try stored token authentication
+      const storedTokenResult = await tryAuthWithStoredToken()
+      if (storedTokenResult) {
+        log("✅ Auto-login successful via stored token")
+        return
+      }
+
+      log("ℹ️ No valid stored credentials for auto-login")
+    } else if (!auth || !firestore) {
+      log("⚠️ Firebase not properly initialized, skipping auto-login")
+    }
+  } catch (error) {
+    log("❌ Auto-login attempt failed:", error)
+  }
+}
+
+// Multiple startup attempts to handle service worker timing issues
+setTimeout(attemptAutoLogin, 1000)
+setTimeout(attemptAutoLogin, 3000)
+setTimeout(attemptAutoLogin, 5000)
+
+// Periodic token refresh check (every 30 minutes)
+setInterval(
+  async () => {
+    try {
+      if (currentUser && auth) {
+        log("🔄 Performing periodic token refresh check...")
+        const refreshedToken = await refreshOAuthToken()
+        if (refreshedToken) {
+          log("✅ Token refreshed successfully during periodic check")
+        }
+      }
+    } catch (error) {
+      log("❌ Periodic token refresh failed:", error)
+    }
+  },
+  30 * 60 * 1000
+) // 30 minutes
