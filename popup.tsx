@@ -6,7 +6,8 @@ import {
   Save,
   Trash2,
   TrendingUp,
-  User
+  User,
+  X
 } from "lucide-react"
 import React, { useEffect, useState } from "react"
 
@@ -41,6 +42,7 @@ const IndexPopup = () => {
     "recent"
   )
   const [showStats, setShowStats] = useState(false)
+  const [showRightPanel, setShowRightPanel] = useState(false)
 
   // Load items from background script when user logs in
   useEffect(() => {
@@ -191,6 +193,14 @@ const IndexPopup = () => {
     )
   }
 
+  const closeRightPanel = () => {
+    setShowRightPanel(false)
+    setSelectedItem(null)
+    setKeyword("/")
+    setValue("")
+    setIsEditing(false)
+  }
+
   const addNewItem = () => {
     const newItem: SnippetWithMetadata = {
       keyword: "/",
@@ -202,6 +212,7 @@ const IndexPopup = () => {
     setKeyword("/")
     setValue("")
     setIsEditing(true)
+    setShowRightPanel(true)
   }
 
   const handleKeywordChange = (e) => {
@@ -216,6 +227,7 @@ const IndexPopup = () => {
     setKeyword(item.keyword)
     setValue(item.value)
     setIsEditing(false)
+    setShowRightPanel(true)
   }
 
   const saveCurrentItem = async () => {
@@ -492,7 +504,7 @@ const IndexPopup = () => {
 
   return (
     <div
-      className={`flex h-[550px] w-[750px] bg-[#0a0a0f] relative overflow-hidden ${showLoginAnimation ? "animate-slide-in" : ""}`}>
+      className={`flex h-[550px] ${showRightPanel ? "w-[750px]" : "w-80"} bg-[#0a0a0f] relative overflow-hidden transition-all duration-300 ${showLoginAnimation ? "animate-slide-in" : ""}`}>
       {/* Light Rays Effect for logged in state */}
       <LightRays
         raysOrigin="top-left"
@@ -654,7 +666,7 @@ const IndexPopup = () => {
                 <div
                   key={item.docId}
                   className={`
-                    group p-3 rounded-xl cursor-pointer transition-all duration-300 border backdrop-blur-sm
+                    group p-2 rounded-xl cursor-pointer transition-all duration-300 border backdrop-blur-sm
                     ${
                       selectedItem && selectedItem.docId === item.docId
                         ? "bg-[#b6b9be]/20 border-[#b6b9be]/30  shadow-[#b6b9be]/10"
@@ -665,13 +677,21 @@ const IndexPopup = () => {
                   style={{ animationDelay: `${index * 50}ms` }}
                   onClick={() => selectItem(item)}>
                   <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                    <div className="flex-1 min-w-0 relative">
+                      <div className="flex items-center justify-between mb-1">
                         <div className="font-medium text-[#b6b9be] truncate font-figtree">
                           {item.keyword || "Untitled"}
                         </div>
+                        <div className="text-xs text-[#b6b9be]/40 font-figtree">
+                          {formatLastUsed(item.lastUsed)}
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <div className="text-sm text-[#b6b9be]/60 truncate font-figtree pr-16">
+                          {item.value || "No value"}
+                        </div>
                         {item.usageCount > 0 && (
-                          <div className="flex items-center gap-1 px-2 py-0.5 bg-[#b6b9be]/20 rounded-full">
+                          <div className="absolute top-0 right-0 flex items-center gap-1 px-2 py-0.5 bg-[#b6b9be]/20 backdrop-blur-md rounded-full border border-[#b6b9be]/30">
                             <TrendingUp
                               size={10}
                               className="text-[#b6b9be]/60"
@@ -681,12 +701,6 @@ const IndexPopup = () => {
                             </span>
                           </div>
                         )}
-                      </div>
-                      <div className="text-sm text-[#b6b9be]/60 truncate font-figtree mb-1">
-                        {item.value || "No value"}
-                      </div>
-                      <div className="text-xs text-[#b6b9be]/40 font-figtree">
-                        {formatLastUsed(item.lastUsed)}
                       </div>
                     </div>
                     <button
@@ -706,127 +720,136 @@ const IndexPopup = () => {
       </div>
 
       {/* Right Panel */}
-      <div className="flex-1 flex flex-col mt-16 relative z-10">
-        {selectedItem ? (
-          <div className="flex-1 flex flex-col animate-fade-in">
-            <div className="p-6 border-b border-[#b6b9be]/10 bg-[#0a0a0f]/40 backdrop-blur-md">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h1 className="text-2xl font-bold text-[#b6b9be] font-figtree">
-                    {isEditing ? "Create New Item" : "Edit Item"}
-                  </h1>
-                  {!isEditing && selectedItem.usageCount > 0 && (
-                    <div className="mt-2 flex items-center gap-4 text-sm text-[#b6b9be]/60 font-figtree">
-                      <span className="flex items-center gap-1">
-                        <TrendingUp size={14} />
-                        Used {selectedItem.usageCount} times
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock size={14} />
-                        {formatLastUsed(selectedItem.lastUsed)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                {value && (
-                  <StatefulButton
-                    onClick={saveCurrentItem}
-                    disabled={saving}
-                    className="flex items-center gap-2 px-6 py-2 bg-[#b6b9be] text-[#0a0a0f] font-medium rounded-xl hover:bg-[#9ca3af] transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-[#b6b9be]/20 disabled:opacity-50 disabled:cursor-not-allowed font-figtree">
-                    {saving ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-[#0a0a0f] border-t-transparent rounded-full animate-spin"></div>
-                        Saving...
-                      </>
-                    ) : (
-                      <>Save Changes</>
+      {showRightPanel && (
+        <div className="flex-1 w-full flex flex-col mt-16 relative z-10">
+          {selectedItem ? (
+            <div className="flex-1 flex flex-col animate-fade-in">
+              <div className="p-6 border-b border-[#b6b9be]/10 bg-[#0a0a0f]/40 backdrop-blur-md">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-bold text-[#b6b9be] font-figtree">
+                      {isEditing ? "Create New Item" : "Edit Item"}
+                    </h1>
+                    {!isEditing && selectedItem.usageCount > 0 && (
+                      <div className="mt-2 flex items-center gap-4 text-sm text-[#b6b9be]/60 font-figtree">
+                        <span className="flex items-center gap-1">
+                          <TrendingUp size={14} />
+                          Used {selectedItem.usageCount} times
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock size={14} />
+                          {formatLastUsed(selectedItem.lastUsed)}
+                        </span>
+                      </div>
                     )}
-                  </StatefulButton>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {value && (
+                      <StatefulButton
+                        onClick={saveCurrentItem}
+                        disabled={saving}
+                        className="flex items-center gap-2 px-6 py-2 bg-[#b6b9be] text-[#0a0a0f] font-medium rounded-xl hover:bg-[#9ca3af] transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-[#b6b9be]/20 disabled:opacity-50 disabled:cursor-not-allowed font-figtree">
+                        {saving ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-[#0a0a0f] border-t-transparent rounded-full animate-spin"></div>
+                            Saving...
+                          </>
+                        ) : (
+                          <>Save Changes</>
+                        )}
+                      </StatefulButton>
+                    )}
+                    <button
+                      onClick={closeRightPanel}
+                      className="p-2 text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10 rounded-lg transition-all duration-200 backdrop-blur-sm">
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 p-6 bg-[#0a0a0f]/20 backdrop-blur-sm overflow-y-auto">
+                <div className="max-w-2xl space-y-6">
+                  <div
+                    className="animate-slide-up"
+                    style={{ animationDelay: "100ms" }}>
+                    <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
+                      Trigger Keyword
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={keyword}
+                        onChange={handleKeywordChange}
+                        placeholder="/email"
+                        disabled={saving}
+                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 text-lg font-mono text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
+                    </div>
+                    <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
+                      <span className="w-1 h-1 bg-[#b6b9be] rounded-full"></span>
+                      Type this keyword to trigger the shortcut
+                    </p>
+                  </div>
+
+                  <div
+                    className="animate-slide-up"
+                    style={{ animationDelay: "200ms" }}>
+                    <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
+                      Replacement Text
+                    </label>
+                    <div className="relative">
+                      <textarea
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        placeholder="Enter the text that will replace your keyword..."
+                        rows={8}
+                        disabled={saving}
+                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 resize-none text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed font-figtree"
+                      />
+                      <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
+                    </div>
+                    <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
+                      <span className="w-1 h-1 bg-green-400 rounded-full"></span>
+                      This text will be inserted when you use the keyword
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center bg-[#0a0a0f]/20 backdrop-blur-sm">
+              <div className="text-center animate-fade-in">
+                <div
+                  onClick={addNewItem}
+                  className="w-24 h-24 mx-auto bg-gradient-to-r from-[#b6b9be]/20 to-[#9ca3af]/20 rounded-full flex items-center justify-center mb-6 animate-pulse-slow backdrop-blur-sm shadow-lg  cursor-pointer hover:from-[#b6b9be]/30 hover:to-[#9ca3af]/30 transition-all duration-200">
+                  <Plus size={32} className="text-[#b6b9be]/60" />
+                </div>
+                <h3 className="text-xl font-semibold text-[#b6b9be] mb-2 font-figtree">
+                  Ready to create shortcuts?
+                </h3>
+                <p className="text-[#b6b9be]/60 max-w-sm font-figtree">
+                  Select an item from the sidebar to edit, or create a new
+                  shortcut to get started
+                </p>
+                {items.length > 0 && (
+                  <div className="mt-6 p-4 bg-[#b6b9be]/5 rounded-lg backdrop-blur-sm border border-[#b6b9be]/10">
+                    <p className="text-sm text-[#b6b9be]/70 font-figtree mb-2">
+                      📊 Your Usage
+                    </p>
+                    <div className="flex justify-center gap-4 text-xs text-[#b6b9be]/60 font-figtree">
+                      <span>{items.length} shortcuts</span>
+                      <span>•</span>
+                      <span>{getTotalUsage()} total uses</span>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
-
-            <div className="flex-1 p-6 bg-[#0a0a0f]/20 backdrop-blur-sm overflow-y-auto">
-              <div className="max-w-2xl space-y-6">
-                <div
-                  className="animate-slide-up"
-                  style={{ animationDelay: "100ms" }}>
-                  <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
-                    Trigger Keyword
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={keyword}
-                      onChange={handleKeywordChange}
-                      placeholder="/email"
-                      disabled={saving}
-                      className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 text-lg font-mono text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                    />
-                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
-                  </div>
-                  <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
-                    <span className="w-1 h-1 bg-[#b6b9be] rounded-full"></span>
-                    Type this keyword to trigger the shortcut
-                  </p>
-                </div>
-
-                <div
-                  className="animate-slide-up"
-                  style={{ animationDelay: "200ms" }}>
-                  <label className="block text-sm font-semibold text-[#b6b9be] mb-3 font-figtree">
-                    Replacement Text
-                  </label>
-                  <div className="relative">
-                    <textarea
-                      value={value}
-                      onChange={(e) => setValue(e.target.value)}
-                      placeholder="Enter the text that will replace your keyword..."
-                      rows={8}
-                      disabled={saving}
-                      className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 resize-none text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed font-figtree"
-                    />
-                    <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
-                  </div>
-                  <p className="text-sm text-[#b6b9be]/60 mt-2 flex items-center gap-1 font-figtree">
-                    <span className="w-1 h-1 bg-green-400 rounded-full"></span>
-                    This text will be inserted when you use the keyword
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-[#0a0a0f]/20 backdrop-blur-sm">
-            <div className="text-center animate-fade-in">
-              <div
-                onClick={addNewItem}
-                className="w-24 h-24 mx-auto bg-gradient-to-r from-[#b6b9be]/20 to-[#9ca3af]/20 rounded-full flex items-center justify-center mb-6 animate-pulse-slow backdrop-blur-sm shadow-lg  cursor-pointer hover:from-[#b6b9be]/30 hover:to-[#9ca3af]/30 transition-all duration-200">
-                <Plus size={32} className="text-[#b6b9be]/60" />
-              </div>
-              <h3 className="text-xl font-semibold text-[#b6b9be] mb-2 font-figtree">
-                Ready to create shortcuts?
-              </h3>
-              <p className="text-[#b6b9be]/60 max-w-sm font-figtree">
-                Select an item from the sidebar to edit, or create a new
-                shortcut to get started
-              </p>
-              {items.length > 0 && (
-                <div className="mt-6 p-4 bg-[#b6b9be]/5 rounded-lg backdrop-blur-sm border border-[#b6b9be]/10">
-                  <p className="text-sm text-[#b6b9be]/70 font-figtree mb-2">
-                    📊 Your Usage
-                  </p>
-                  <div className="flex justify-center gap-4 text-xs text-[#b6b9be]/60 font-figtree">
-                    <span>{items.length} shortcuts</span>
-                    <span>•</span>
-                    <span>{getTotalUsage()} total uses</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

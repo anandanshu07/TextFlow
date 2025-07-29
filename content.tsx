@@ -362,12 +362,12 @@ const QuickTypeContent = () => {
 
     const toast = document.createElement("div")
 
-    // Dark theme styling to match your login UI
+    // Dark theme styling to match your login UI - more compact
     Object.assign(toast.style, {
       display: "flex",
       alignItems: "center",
-      gap: "12px",
-      padding: "16px 20px",
+      gap: "8px",
+      padding: "12px 16px",
       backgroundColor: "#0a0a0f", // Same as your login background
       color: "#b6b9be", // Same as your login text color
       borderRadius: "10px",
@@ -378,8 +378,8 @@ const QuickTypeContent = () => {
       backdropFilter: "blur(12px)",
       fontSize: "14px",
       fontWeight: "500",
-      maxWidth: "320px",
-      minWidth: "220px",
+      maxWidth: "280px",
+      minWidth: "180px",
       opacity: "0",
       transform: "translateX(100%) scale(0.95)",
       transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -387,58 +387,68 @@ const QuickTypeContent = () => {
       position: "relative"
     })
 
-    // Success icon SVG with your theme colors
+    // Success icon SVG with your theme colors - smaller
     const iconSVG = `
-      <div style="width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #b6b9be, #9ca3af); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(182, 185, 190, 0.2);">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <div style="width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg, #b6b9be, #9ca3af); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 8px rgba(182, 185, 190, 0.2);">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
           <path d="M9 12l2 2 4-4" stroke="#0a0a0f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
     `
 
-    // Main content container
+    // Main content container with relative positioning for overlay
     const contentContainer = document.createElement("div")
     Object.assign(contentContainer.style, {
       display: "flex",
       flexDirection: "column",
-      gap: "4px",
-      flex: "1"
+      gap: "2px",
+      flex: "1",
+      position: "relative",
+      minHeight: "24px"
     })
 
-    // Message text with proper styling
+    // Message text with proper styling and padding for overlay
     const textElement = document.createElement("span")
     textElement.textContent = message
     Object.assign(textElement.style, {
-      fontSize: "14px",
-      lineHeight: "1.4",
+      fontSize: "13px",
+      lineHeight: "1.3",
       color: "#b6b9be",
       fontWeight: "500",
-      letterSpacing: "-0.01em"
+      letterSpacing: "-0.01em",
+      paddingRight: usageCount ? "60px" : "0", // Space for usage badge
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
     })
 
-    // Usage count badge (always show)
+    // Usage count badge overlay (positioned absolutely)
     const usageBadge = document.createElement("div")
     const timesUsed = usageCount || 1 // Use the passed count directly, default to 1 for first use
     usageBadge.innerHTML = `
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" style="margin-right: 4px; display: inline-block; vertical-align: middle;">
+      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" style="margin-right: 3px; display: inline-block; vertical-align: middle;">
         <path d="M3 3v18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M9 9l4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
-      <span style="vertical-align: middle;">Used ${timesUsed} ${timesUsed === 1 ? "time" : "times"}</span>
+      <span style="vertical-align: middle;">${timesUsed}</span>
     `
     Object.assign(usageBadge.style, {
-      fontSize: "11px",
+      position: "absolute",
+      top: "0",
+      right: "0",
+      fontSize: "10px",
       lineHeight: "1.2",
       color: "#b6b9be",
-      opacity: "0.7",
+      opacity: "0.8",
       fontWeight: "500",
-      background: "rgba(182, 185, 190, 0.1)",
-      padding: "3px 8px",
-      borderRadius: "6px",
-      display: "inline-flex",
+      background: "rgba(182, 185, 190, 0.15)",
+      backdropFilter: "blur(8px)",
+      padding: "2px 6px",
+      borderRadius: "4px",
+      display: "flex",
       alignItems: "center",
-      marginTop: "2px",
-      width: "fit-content" // Ensure the badge fits its content
+      border: "1px solid rgba(182, 185, 190, 0.2)",
+      height: "18px"
     })
 
     // Progress bar with theme colors
@@ -450,7 +460,7 @@ const QuickTypeContent = () => {
       height: "2px",
       width: "100%",
       background: "linear-gradient(90deg, #b6b9be, #9ca3af)",
-      borderRadius: "0 0 16px 16px",
+      borderRadius: "0 0 10px 10px",
       transformOrigin: "left",
       transform: "scaleX(1)",
       transition: "transform 3200ms linear",
@@ -467,13 +477,15 @@ const QuickTypeContent = () => {
       bottom: "0",
       background:
         "radial-gradient(circle at 20% 20%, rgba(182, 185, 190, 0.03) 0%, transparent 50%)",
-      borderRadius: "16px",
+      borderRadius: "10px",
       pointerEvents: "none"
     })
 
     // Assemble the toast
     contentContainer.appendChild(textElement)
-    contentContainer.appendChild(usageBadge)
+    if (usageCount) {
+      contentContainer.appendChild(usageBadge)
+    }
 
     toast.innerHTML = iconSVG
     toast.appendChild(contentContainer)
@@ -507,7 +519,7 @@ const QuickTypeContent = () => {
       }, 400)
     }, 3200)
 
-    log("🍞 Dark UI toast notification displayed:", message)
+    log("🍞 Compact dark UI toast notification displayed:", message)
   }
 
   // Process input with snippet replacement
