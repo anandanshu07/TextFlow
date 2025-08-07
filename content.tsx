@@ -379,7 +379,7 @@ const QuickTypeContent = () => {
       fontSize: "14px",
       fontWeight: "500",
       maxWidth: "280px",
-      minWidth: "180px",
+      minWidth: "200px",
       opacity: "0",
       transform: "translateX(100%) scale(0.95)",
       transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -413,13 +413,16 @@ const QuickTypeContent = () => {
     Object.assign(textElement.style, {
       fontSize: "13px",
       lineHeight: "1.3",
+      marginTop: "1.5px",
       color: "#b6b9be",
       fontWeight: "500",
       letterSpacing: "-0.01em",
       paddingRight: usageCount ? "60px" : "0", // Space for usage badge
       overflow: "hidden",
       textOverflow: "ellipsis",
-      whiteSpace: "nowrap"
+      whiteSpace: "nowrap",
+      maxWidth: usageCount ? "200px" : "220px", // Fixed width to ensure usage count is visible
+      display: "block" // Ensure the maxWidth is respected
     })
 
     // Usage count badge overlay (positioned absolutely)

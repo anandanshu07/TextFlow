@@ -1,24 +1,11 @@
-import { initializeApp } from "firebase/app"
-import {
-  getAuth,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithCredential,
-  signOut
-} from "firebase/auth"
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  getFirestore,
-  increment,
-  orderBy,
-  query,
-  updateDoc,
-  where
-} from "firebase/firestore"
+import { initializeApp } from "firebase/app";
+import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from "firebase/auth";
+
+
+
+
+
+// Removed Firestore imports - using Express backend instead
 
 // Enhanced logging
 const log = (message: string, data?: any) => {
@@ -36,18 +23,70 @@ const firebaseConfig = {
   measurementId: process.env.PLASMO_PUBLIC_FIREBASE_MEASUREMENT_ID
 }
 
-// Initialize Firebase with error handling
+// Initialize Firebase with error handling (auth only)
 let app: any = null
 let auth: any = null
-let firestore: any = null
+
+// Express server configuration
+const EXPRESS_SERVER_URL = "https://slash-backend-73zn.onrender.com"
+
+// Helper function to get Firebase ID token
+const getFirebaseIdToken = async (): Promise<string | null> => {
+  try {
+    if (!auth || !auth.currentUser) {
+      log("❌ No authenticated user found")
+      return null
+    }
+
+    const idToken = await auth.currentUser.getIdToken()
+    log("✅ Firebase ID token retrieved")
+    return idToken
+  } catch (error) {
+    log("❌ Error getting Firebase ID token:", error)
+    return null
+  }
+}
+
+// Helper function to make authenticated API calls to Express server
+const makeApiCall = async (
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<any> => {
+  try {
+    const idToken = await getFirebaseIdToken()
+    if (!idToken) {
+      throw new Error("No valid Firebase ID token available")
+    }
+
+    const response = await fetch(`${EXPRESS_SERVER_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`,
+        ...options.headers
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.text()
+      throw new Error(
+        `API call failed: ${response.status} ${response.statusText} - ${errorData}`
+      )
+    }
+
+    return await response.json()
+  } catch (error) {
+    log(`❌ API call to ${endpoint} failed:`, error)
+    throw error
+  }
+}
 
 try {
   app = initializeApp(firebaseConfig)
   auth = getAuth(app)
-  firestore = getFirestore(app)
 
   // Don't set persistence in background script - handle it manually with Chrome storage
-  log("✅ Firebase initialized successfully")
+  log("✅ Firebase auth initialized successfully")
 } catch (error) {
   log("❌ Firebase initialization failed:", error)
 }
@@ -235,23 +274,12 @@ let snippetMetadata: Record<
 > = {}
 let isLoading = false
 
-// Load user snippets from Firebase with metadata
+// Load user snippets from Express server with metadata
 const loadUserSnippets = async (userId: string) => {
-  if (!firestore) {
-    log("❌ Firestore not available")
-    return {}
-  }
-
   try {
     log("📥 Loading snippets for user:", userId)
 
-    const userItemsRef = collection(
-      firestore,
-      "quickTypeItems",
-      userId,
-      "items"
-    )
-    const snapshot = await getDocs(userItemsRef)
+    const response = await makeApiCall("/api/snippets")
 
     const snippets: Record<string, string> = {}
     const metadata: Record<
@@ -259,13 +287,12 @@ const loadUserSnippets = async (userId: string) => {
       { docId: string; usageCount: number; lastUsed?: Date }
     > = {}
 
-    if (!snapshot.empty) {
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data()
-        const keyword = data.keyword || data.shortcut || data.trigger
-        const value = data.value || data.text || data.content
-        const usageCount = data.usageCount || 0
-        const lastUsed = data.lastUsed ? data.lastUsed.toDate() : undefined
+    if (response.success && response.snippets) {
+      response.snippets.forEach((item: any) => {
+        const keyword = item.keyword || item.shortcut || item.trigger
+        const value = item.value || item.text || item.content
+        const usageCount = item.usageCount || 0
+        const lastUsed = item.lastUsed ? new Date(item.lastUsed) : undefined
 
         if (keyword && value) {
           const formattedKeyword = keyword.startsWith("/")
@@ -273,7 +300,7 @@ const loadUserSnippets = async (userId: string) => {
             : `/${keyword}`
           snippets[formattedKeyword] = value
           metadata[formattedKeyword] = {
-            docId: doc.id,
+            docId: item.id || item._id,
             usageCount,
             lastUsed
           }
@@ -297,7 +324,7 @@ const loadUserSnippets = async (userId: string) => {
 
 // Increment usage count for a keyword
 const incrementUsageCount = async (keyword: string) => {
-  if (!currentUser || !firestore || !snippetMetadata[keyword]) {
+  if (!currentUser || !snippetMetadata[keyword]) {
     log(
       "❌ Cannot increment usage count - user not logged in or keyword not found"
     )
@@ -306,60 +333,54 @@ const incrementUsageCount = async (keyword: string) => {
 
   try {
     const { docId } = snippetMetadata[keyword]
-    const docRef = doc(
-      firestore,
-      "quickTypeItems",
-      currentUser.uid,
-      "items",
-      docId
-    )
 
-    // Update in Firebase
-    await updateDoc(docRef, {
-      usageCount: increment(1),
-      lastUsed: new Date()
+    // Update in Express server
+    const response = await makeApiCall(`/api/snippets/${docId}/usage`, {
+      method: "POST"
     })
 
-    // Update local metadata
-    snippetMetadata[keyword].usageCount += 1
-    snippetMetadata[keyword].lastUsed = new Date()
+    if (response.success) {
+      // Update local metadata
+      snippetMetadata[keyword].usageCount += 1
+      snippetMetadata[keyword].lastUsed = new Date()
 
-    log(
-      `📈 Usage count incremented for ${keyword}: ${snippetMetadata[keyword].usageCount}`
-    )
+      log(
+        `📈 Usage count incremented for ${keyword}: ${snippetMetadata[keyword].usageCount}`
+      )
 
-    // Notify content scripts and popup about usage update
-    const usageData = {
-      keyword,
-      usageCount: snippetMetadata[keyword].usageCount,
-      lastUsed: snippetMetadata[keyword].lastUsed
+      // Notify content scripts and popup about usage update
+      const usageData = {
+        keyword,
+        usageCount: snippetMetadata[keyword].usageCount,
+        lastUsed: snippetMetadata[keyword].lastUsed
+      }
+
+      // Notify popup
+      chrome.runtime
+        .sendMessage({
+          type: "USAGE_UPDATED",
+          ...usageData
+        })
+        .catch(() => {
+          // Popup might not be open, ignore errors
+        })
+
+      // Notify content scripts
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs
+              .sendMessage(tab.id, {
+                type: "USAGE_UPDATED",
+                ...usageData
+              })
+              .catch(() => {
+                // Tab might not have content script, ignore errors
+              })
+          }
+        })
+      })
     }
-
-    // Notify popup
-    chrome.runtime
-      .sendMessage({
-        type: "USAGE_UPDATED",
-        ...usageData
-      })
-      .catch(() => {
-        // Popup might not be open, ignore errors
-      })
-
-    // Notify content scripts
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach((tab) => {
-        if (tab.id) {
-          chrome.tabs
-            .sendMessage(tab.id, {
-              type: "USAGE_UPDATED",
-              ...usageData
-            })
-            .catch(() => {
-              // Tab might not have content script, ignore errors
-            })
-        }
-      })
-    })
   } catch (error) {
     log("❌ Error incrementing usage count:", error)
   }
@@ -380,6 +401,34 @@ const getSnippetsWithMetadata = () => {
   return snippetsWithMetadata
 }
 
+// Sync user to backend server
+const syncUserToBackend = async (user: any) => {
+  try {
+    log("👤 Syncing user to backend:", user.email)
+
+    const userData = {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      lastLoginAt: new Date().toISOString()
+    }
+
+    const response = await makeApiCall("/api/user/sync", {
+      method: "POST",
+      body: JSON.stringify(userData)
+    })
+
+    if (response.success) {
+      log("✅ User synced to backend successfully")
+    } else {
+      log("⚠️ User sync failed:", response.error)
+    }
+  } catch (error) {
+    log("❌ Error syncing user to backend:", error)
+  }
+}
+
 // Handle authentication state changes
 if (auth) {
   onAuthStateChanged(auth, async (user) => {
@@ -396,6 +445,10 @@ if (auth) {
 
     if (user) {
       log("👤 User authenticated:", user.email)
+
+      // Sync user to backend first
+      await syncUserToBackend(user)
+
       userSnippets = await loadUserSnippets(user.uid)
       log("📦 Loaded snippets for user:", userSnippets)
       log("📊 Loaded snippet metadata:", snippetMetadata)
@@ -487,9 +540,9 @@ const handleLogin = async () => {
   log("🚀 Starting login process")
 
   try {
-    // Check if Firebase is properly initialized
-    if (!auth || !firestore) {
-      throw new Error("Firebase not properly initialized")
+    // Check if Firebase auth is properly initialized
+    if (!auth) {
+      throw new Error("Firebase auth not properly initialized")
     }
 
     // First, check if we already have an authenticated user in Firebase
@@ -626,102 +679,94 @@ const handleRefreshSnippets = async () => {
   }
 }
 
-// Save snippet to Firebase
-const saveSnippetToFirebase = async (keyword: string, value: string) => {
-  if (!currentUser || !firestore) {
+// Save snippet to Express server
+const saveSnippetToExpressServer = async (keyword: string, value: string) => {
+  if (!currentUser) {
     return {
       success: false,
-      error: "No user logged in or Firestore not available"
+      error: "No user logged in"
     }
   }
 
   try {
-    const userItemsRef = collection(
-      firestore,
-      "quickTypeItems",
-      currentUser.uid,
-      "items"
-    )
-
-    // Add the snippet to Firebase with initial usage count
-    const docRef = await addDoc(userItemsRef, {
-      keyword,
-      value,
-      userId: currentUser.uid,
-      usageCount: 0,
-      lastUsed: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    })
-
-    log(`✅ Snippet saved to Firebase: ${keyword} -> ${value}`)
-
-    // Update local snippets and metadata
-    userSnippets[keyword] = value
-    snippetMetadata[keyword] = {
-      docId: docRef.id,
-      usageCount: 0,
-      lastUsed: undefined
-    }
-
-    // Notify content scripts about snippet update
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach((tab) => {
-        if (tab.id) {
-          chrome.tabs
-            .sendMessage(tab.id, {
-              type: "SNIPPETS_UPDATED",
-              snippets: userSnippets,
-              snippetsWithMetadata: getSnippetsWithMetadata()
-            })
-            .catch(() => {
-              // Tab might not have content script, ignore errors
-            })
-        }
+    // Save the snippet to Express server
+    const response = await makeApiCall("/api/snippets", {
+      method: "POST",
+      body: JSON.stringify({
+        keyword,
+        value,
+        usageCount: 0,
+        lastUsed: null
       })
     })
 
-    return { success: true, docId: docRef.id }
+    if (response.success) {
+      log(`✅ Snippet saved to Express server: ${keyword} -> ${value}`)
+
+      // Update local snippets and metadata
+      userSnippets[keyword] = value
+      snippetMetadata[keyword] = {
+        docId: response.snippet.id || response.snippet._id,
+        usageCount: 0,
+        lastUsed: undefined
+      }
+
+      // Notify content scripts about snippet update
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs
+              .sendMessage(tab.id, {
+                type: "SNIPPETS_UPDATED",
+                snippets: userSnippets,
+                snippetsWithMetadata: getSnippetsWithMetadata()
+              })
+              .catch(() => {
+                // Tab might not have content script, ignore errors
+              })
+          }
+        })
+      })
+
+      return {
+        success: true,
+        docId: response.snippet.id || response.snippet._id
+      }
+    } else {
+      return {
+        success: false,
+        error: response.error || "Failed to save snippet"
+      }
+    }
   } catch (error) {
-    log("❌ Error saving snippet to Firebase:", error)
+    log("❌ Error saving snippet to Express server:", error)
     return { success: false, error: error.message }
   }
 }
 
-// Delete snippet from Firebase
-const deleteSnippetFromFirebase = async (keyword: string) => {
-  if (!currentUser || !firestore) {
+// Delete snippet from Express server
+const deleteSnippetFromExpressServer = async (keyword: string) => {
+  if (!currentUser) {
     return {
       success: false,
-      error: "No user logged in or Firestore not available"
+      error: "No user logged in"
     }
   }
 
   try {
-    // First, find the document with this keyword
-    const userItemsRef = collection(
-      firestore,
-      "quickTypeItems",
-      currentUser.uid,
-      "items"
-    )
-    const q = query(userItemsRef, where("keyword", "==", keyword))
-    const snapshot = await getDocs(q)
+    if (!snippetMetadata[keyword]) {
+      return { success: false, error: "Snippet not found" }
+    }
 
-    if (!snapshot.empty) {
-      // Delete the first matching document
-      const docToDelete = snapshot.docs[0]
-      await deleteDoc(
-        doc(
-          firestore,
-          "quickTypeItems",
-          currentUser.uid,
-          "items",
-          docToDelete.id
-        )
-      )
+    const { docId } = snippetMetadata[keyword]
 
-      log(`✅ Snippet deleted from Firebase: ${keyword}`)
+    // Delete the snippet from Express server
+    const response = await makeApiCall(`/api/snippets/${docId}`, {
+      method: "DELETE"
+    })
+
+    if (response.success) {
+      log(`✅ Snippet deleted from Express server: ${keyword}`)
 
       // Remove from local snippets and metadata
       delete userSnippets[keyword]
@@ -746,10 +791,13 @@ const deleteSnippetFromFirebase = async (keyword: string) => {
 
       return { success: true }
     } else {
-      return { success: false, error: "Snippet not found" }
+      return {
+        success: false,
+        error: response.error || "Failed to delete snippet"
+      }
     }
   } catch (error) {
-    log("❌ Error deleting snippet from Firebase:", error)
+    log("❌ Error deleting snippet from Express server:", error)
     return { success: false, error: error.message }
   }
 }
@@ -764,7 +812,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         success: true,
         message: "Background script is working",
-        firebaseInitialized: !!(auth && firestore)
+        firebaseAuthInitialized: !!auth,
+        expressServerUrl: EXPRESS_SERVER_URL
       })
       return true
 
@@ -800,11 +849,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break
 
     case "SAVE_SNIPPET":
-      saveSnippetToFirebase(message.keyword, message.value).then(sendResponse)
+      saveSnippetToExpressServer(message.keyword, message.value).then(
+        sendResponse
+      )
       return true
 
     case "DELETE_SNIPPET":
-      deleteSnippetFromFirebase(message.keyword).then(sendResponse)
+      deleteSnippetFromExpressServer(message.keyword).then(sendResponse)
       return true
 
     case "INCREMENT_USAGE":
@@ -828,6 +879,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         totalUsage: stats.reduce((sum, stat) => sum + stat.usageCount, 0)
       })
       break
+
+    case "TEST_BACKEND":
+      log("🧪 Backend connection test received")
+      // Test the backend connection
+      if (!currentUser) {
+        sendResponse({
+          success: false,
+          error: "No user logged in"
+        })
+      } else {
+        // Make a simple test call to the backend
+        makeApiCall("/api/test")
+          .then(() => {
+            log("✅ Backend test successful")
+            sendResponse({
+              success: true,
+              message: "Backend is connected and accessible"
+            })
+          })
+          .catch((error) => {
+            log("❌ Backend test failed:", error)
+            sendResponse({
+              success: false,
+              error: `Backend connection failed: ${error.message}`
+            })
+          })
+      }
+      return true
 
     case "DEBUG_STORAGE":
       log("🐛 Debug storage request received")
@@ -890,7 +969,7 @@ log("🚀 QuickType background script initialized with persistent login")
 // Use a longer delay for service worker context to ensure everything is ready
 const attemptAutoLogin = async () => {
   try {
-    if (!currentUser && !isLoading && auth && firestore) {
+    if (!currentUser && !isLoading && auth) {
       log("🔄 Attempting auto-login with multiple strategies...")
 
       // Strategy 1: Check existing Firebase auth state
@@ -908,8 +987,8 @@ const attemptAutoLogin = async () => {
       }
 
       log("ℹ️ No valid stored credentials for auto-login")
-    } else if (!auth || !firestore) {
-      log("⚠️ Firebase not properly initialized, skipping auto-login")
+    } else if (!auth) {
+      log("⚠️ Firebase auth not properly initialized, skipping auto-login")
     }
   } catch (error) {
     log("❌ Auto-login attempt failed:", error)
