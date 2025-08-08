@@ -297,7 +297,8 @@ const IndexPopup = () => {
       } else {
         // Update existing item - send to background script
         const response = await chrome.runtime.sendMessage({
-          type: "SAVE_SNIPPET",
+          type: "UPDATE_SNIPPET",
+          docId: selectedItem?.docId,
           keyword: trimmedKeyword,
           value: trimmedValue
         })

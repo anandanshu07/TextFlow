@@ -1,9 +1,11 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut } from "firebase/auth";
-
-
-
-
+import { initializeApp } from "firebase/app"
+import {
+  getAuth,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithCredential,
+  signOut
+} from "firebase/auth"
 
 // Removed Firestore imports - using Express backend instead
 
@@ -703,13 +705,9 @@ const saveSnippetToExpressServer = async (keyword: string, value: string) => {
     if (response.success) {
       log(`✅ Snippet saved to Express server: ${keyword} -> ${value}`)
 
-      // Update local snippets and metadata
-      userSnippets[keyword] = value
-      snippetMetadata[keyword] = {
-        docId: response.snippet.id || response.snippet._id,
-        usageCount: 0,
-        lastUsed: undefined
-      }
+      // Refresh snippets from database to ensure consistency
+      const refreshedSnippets = await loadUserSnippets(currentUser.uid)
+      userSnippets = refreshedSnippets
 
       // Notify content scripts about snippet update
       chrome.tabs.query({}, (tabs) => {
@@ -744,6 +742,69 @@ const saveSnippetToExpressServer = async (keyword: string, value: string) => {
   }
 }
 
+// Update existing snippet in Express server
+const updateSnippetInExpressServer = async (
+  docId: string,
+  keyword: string,
+  value: string
+) => {
+  if (!currentUser) {
+    return {
+      success: false,
+      error: "No user logged in"
+    }
+  }
+
+  try {
+    // Update the snippet in Express server
+    const response = await makeApiCall(`/api/snippets/${docId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        keyword,
+        value
+      })
+    })
+
+    if (response.success) {
+      log(`✅ Snippet updated in Express server: ${keyword} -> ${value}`)
+
+      // Refresh snippets from database to ensure consistency
+      const refreshedSnippets = await loadUserSnippets(currentUser.uid)
+      userSnippets = refreshedSnippets
+
+      // Notify content scripts about snippet update
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.id) {
+            chrome.tabs
+              .sendMessage(tab.id, {
+                type: "SNIPPETS_UPDATED",
+                snippets: userSnippets,
+                snippetsWithMetadata: getSnippetsWithMetadata()
+              })
+              .catch(() => {
+                // Tab might not have content script, ignore errors
+              })
+          }
+        })
+      })
+
+      return {
+        success: true,
+        docId: docId
+      }
+    } else {
+      return {
+        success: false,
+        error: response.error || "Failed to update snippet"
+      }
+    }
+  } catch (error) {
+    log("❌ Error updating snippet in Express server:", error)
+    return { success: false, error: error.message }
+  }
+}
+
 // Delete snippet from Express server
 const deleteSnippetFromExpressServer = async (keyword: string) => {
   if (!currentUser) {
@@ -768,9 +829,9 @@ const deleteSnippetFromExpressServer = async (keyword: string) => {
     if (response.success) {
       log(`✅ Snippet deleted from Express server: ${keyword}`)
 
-      // Remove from local snippets and metadata
-      delete userSnippets[keyword]
-      delete snippetMetadata[keyword]
+      // Refresh snippets from database to ensure consistency
+      const refreshedSnippets = await loadUserSnippets(currentUser.uid)
+      userSnippets = refreshedSnippets
 
       // Notify content scripts about snippet update
       chrome.tabs.query({}, (tabs) => {
@@ -852,6 +913,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       saveSnippetToExpressServer(message.keyword, message.value).then(
         sendResponse
       )
+      return true
+
+    case "UPDATE_SNIPPET":
+      updateSnippetInExpressServer(
+        message.docId,
+        message.keyword,
+        message.value
+      ).then(sendResponse)
       return true
 
     case "DELETE_SNIPPET":
