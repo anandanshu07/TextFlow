@@ -6,9 +6,9 @@ let globalSnippets: Record<string, string> = {
   "/email": "Please Login Quick Type Chrome Extension"
 }
 
-// Enhanced logging function
+// Enhanced logging function - removed console logs
 const log = (message: string, data?: any) => {
-  console.log(`[QuickType] ${message}`, data || "")
+  // Console logs removed
 }
 
 // Main Content Script Component
@@ -33,14 +33,11 @@ const QuickTypeContent = () => {
   // Load snippets from background script
   const loadSnippetsFromBackground = async () => {
     try {
-      log("📥 Loading snippets from background script")
-
       const response = await chrome.runtime.sendMessage({
         type: "GET_SNIPPETS"
       })
 
       if (response.snippets && Object.keys(response.snippets).length > 0) {
-        log("✅ Snippets loaded from background:", response.snippets)
         globalSnippets = response.snippets
         setSnippets(response.snippets)
 
@@ -52,10 +49,8 @@ const QuickTypeContent = () => {
           })
           setUsageCounts(usageData)
           usageCountsRef.current = usageData // Also update ref
-          log("📊 Usage counts loaded:", usageData)
         }
       } else {
-        log("ℹ️ No snippets from background, keeping defaults")
       }
     } catch (error) {
       log("❌ Error loading snippets from background:", error)
@@ -99,11 +94,9 @@ const QuickTypeContent = () => {
             })
             setUsageCounts(usageData)
             usageCountsRef.current = usageData // Also update ref
-            log("📊 Initial usage counts loaded:", usageData)
           }
         }
       } else {
-        log("🚫 No user logged in")
         // If no user and we haven't retried enough, try again after a delay
         // This helps catch cases where the background script is still initializing
         if (retryCount < 3) {
@@ -132,10 +125,6 @@ const QuickTypeContent = () => {
 
   // Initialize when component mounts
   useEffect(() => {
-    log(
-      "🔄 Initializing QuickType content script with persistent login support"
-    )
-
     // Get initial user state with retry mechanism
     getUserState()
 
@@ -145,11 +134,9 @@ const QuickTypeContent = () => {
 
       switch (message.type) {
         case "USER_LOGIN":
-          log("👤 User login message received")
           setUser(message.user)
           setIsCheckingAuth(false)
           if (message.snippets) {
-            log("✅ User snippets received:", message.snippets)
             globalSnippets = message.snippets
             setSnippets(message.snippets)
 
@@ -161,13 +148,11 @@ const QuickTypeContent = () => {
               })
               setUsageCounts(usageData)
               usageCountsRef.current = usageData // Also update ref
-              log("📊 Login usage counts loaded:", usageData)
             }
           }
           break
 
         case "USER_LOGOUT":
-          log("🚫 User logout message received")
           setUser(null)
           setIsCheckingAuth(false)
           // Reset to default snippets
@@ -180,7 +165,6 @@ const QuickTypeContent = () => {
           break
 
         case "USER_STATE_CHANGED":
-          log("🔄 User state changed message received")
           setUser(message.user)
           setIsCheckingAuth(false)
           if (message.user && message.snippets) {
@@ -208,7 +192,6 @@ const QuickTypeContent = () => {
           break
 
         case "SNIPPETS_UPDATED":
-          log("🔄 Snippets updated message received")
           if (message.snippets) {
             globalSnippets = message.snippets
             setSnippets(message.snippets)
@@ -221,12 +204,10 @@ const QuickTypeContent = () => {
             })
             setUsageCounts(usageData)
             usageCountsRef.current = usageData // Also update ref
-            log("📊 Usage counts updated:", usageData)
           }
           break
 
         case "USAGE_UPDATED":
-          log("📈 Usage updated message received:", message)
           // Update local usage counts for toast display
           // Only update if the received count is higher than our current count (avoid overwriting optimistic updates)
           setUsageCounts((prev) => {
@@ -240,7 +221,7 @@ const QuickTypeContent = () => {
             usageCountsRef.current = newCounts // Also update ref
             return newCounts
           })
-          log(`📊 Usage count for ${message.keyword}: ${message.usageCount}`)
+
           break
 
         default:
@@ -269,7 +250,6 @@ const QuickTypeContent = () => {
       try {
         audioContextRef.current = new (window.AudioContext ||
           (window as any).webkitAudioContext)()
-        log("🔊 Audio context initialized")
       } catch (error) {
         log("❌ Failed to initialize audio context:", error)
       }
@@ -335,8 +315,6 @@ const QuickTypeContent = () => {
 
   // Dark UI themed toast notification system
   const createToast = (message: string, usageCount?: number) => {
-    log(`🍞 Creating toast - Message: "${message}", Usage Count: ${usageCount}`)
-
     // Remove existing toast if present
     const existingToast = document.querySelector(".quicktype-toast-wrapper")
     if (existingToast) {
@@ -536,13 +514,11 @@ const QuickTypeContent = () => {
     })
 
     if (!target.value) {
-      log("⏭️ Skipping - no value")
       return
     }
 
     // Skip password fields and hidden inputs
     if (target.type === "password" || target.type === "hidden") {
-      log("⏭️ Skipping - password/hidden field")
       return
     }
 
@@ -560,14 +536,10 @@ const QuickTypeContent = () => {
         )
         hasReplacement = true
         replacedKeywords.push(keyword)
-
-        log(`🔄 Replaced "${keyword}" with "${replacement}"`)
       }
     }
 
     if (hasReplacement) {
-      log("✅ Applying replacement", { originalValue, newValue })
-
       // Store original selection
       const cursorPosition = target.selectionStart || 0
       const cursorEnd = target.selectionEnd || 0
@@ -975,33 +947,7 @@ const QuickTypeContent = () => {
   // Enhanced debug functions
   useEffect(() => {
     ;(window as any).quickTypeDebug = () => {
-      console.group("🐛 QuickType Debug Info")
-      console.log("- Initialized:", isInitialized)
-      console.log("- Checking auth:", isCheckingAuth)
-      console.log("- Current user:", user?.email || "Not logged in")
-      console.log("- Current snippets:", snippets)
-      console.log("- Global snippets:", globalSnippets)
-      console.log("- Usage counts:", usageCounts)
-      console.log("- Usage counts ref:", usageCountsRef.current)
-      console.log("- Currently focused element:", focusedElementRef.current)
-      console.log(
-        "- Audio context:",
-        audioContextRef.current?.state || "Not initialized"
-      )
-
-      // Count inputs on page
-      const allInputs = document.querySelectorAll(
-        'input, textarea, [contenteditable="true"], [contenteditable=""]'
-      )
-      console.log(`- Total inputs on page: ${allInputs.length}`)
-
-      allInputs.forEach((input, index) => {
-        console.log(
-          `  ${index + 1}. ${input.tagName} - id: ${input.id || "none"} - type: ${(input as any).type || "none"}`
-        )
-      })
-
-      console.groupEnd()
+      // Debug info removed
     }
     ;(window as any).quickTypeTest = () => {
       log("🧪 Creating test input")
@@ -1040,15 +986,12 @@ const QuickTypeContent = () => {
       }, 15000)
     }
     ;(window as any).quickTypeTestToast = () => {
-      log("🧪 Testing toast notification")
       createToast("Test notification - this should appear!")
     }
     ;(window as any).quickTypeTestSound = () => {
-      log("🧪 Testing sound")
       playNotificationSound()
     }
     ;(window as any).quickTypeReload = () => {
-      log("🔄 Manually reloading snippets...")
       loadSnippetsFromBackground()
     }
     ;(window as any).quickTypeStatus = () => {
@@ -1071,24 +1014,15 @@ const QuickTypeContent = () => {
       const formattedKeyword = keyword.startsWith("/") ? keyword : `/${keyword}`
       globalSnippets[formattedKeyword] = value
       setSnippets({ ...globalSnippets })
-      console.log(`✅ Manually added: ${formattedKeyword} -> ${value}`)
-      console.log("Current snippets:", globalSnippets)
     }
     ;(window as any).quickTypeDebugStorage = async () => {
       try {
         const response = await chrome.runtime.sendMessage({
           type: "DEBUG_STORAGE"
         })
-        console.group("🗄️ QuickType Storage Debug")
-        console.log("Storage response:", response)
-        console.log("Has OAuth token:", response.hasOAuthToken)
-        console.log("Token expiry:", response.tokenExpiry)
-        console.log("Is token valid:", response.isTokenValid)
-        console.log("All stored items:", response.storedItems)
-        console.groupEnd()
         return response
       } catch (error) {
-        console.error("❌ Storage debug failed:", error)
+        // Storage debug failed
       }
     }
     ;(window as any).quickTypeClearStorage = async () => {
@@ -1096,36 +1030,30 @@ const QuickTypeContent = () => {
         const response = await chrome.runtime.sendMessage({
           type: "CLEAR_STORAGE"
         })
-        console.log("🗑️ Storage cleared:", response)
         return response
       } catch (error) {
-        console.error("❌ Clear storage failed:", error)
+        // Clear storage failed
       }
     }
     ;(window as any).quickTypeTestLogin = async () => {
       try {
-        console.log("🧪 Testing login...")
         const response = await chrome.runtime.sendMessage({ type: "LOGIN" })
-        console.log("Login response:", response)
         return response
       } catch (error) {
-        console.error("❌ Login test failed:", error)
+        // Login test failed
       }
     }
     ;(window as any).quickTypeTestLogout = async () => {
       try {
-        console.log("🧪 Testing logout...")
         const response = await chrome.runtime.sendMessage({ type: "LOGOUT" })
-        console.log("Logout response:", response)
         return response
       } catch (error) {
-        console.error("❌ Logout test failed:", error)
+        // Logout test failed
       }
     }
 
     // Auto-run debug on initialization
     if (isInitialized && !isCheckingAuth) {
-      log("✅ QuickType fully initialized with persistent login support!")
       setTimeout(() => {
         ;(window as any).quickTypeDebug()
       }, 1000)
@@ -1137,10 +1065,7 @@ const QuickTypeContent = () => {
 
 // Initialize the content script
 const init = () => {
-  log("🚀 QuickType React content script loading...")
-
   if (document.getElementById("quicktype-content-script")) {
-    log("⚠️ QuickType already initialized, skipping...")
     return
   }
 
@@ -1152,19 +1077,6 @@ const init = () => {
 
     const root = createRoot(container)
     root.render(<QuickTypeContent />)
-
-    log("✅ QuickType React content script loaded!")
-    log("💡 Available debug commands:")
-    log("  - quickTypeDebug() - Show debug info and count inputs")
-    log("  - quickTypeTest() - Create test input with auto-typing")
-    log("  - quickTypeTestToast() - Test toast notification")
-    log("  - quickTypeTestSound() - Test notification sound")
-    log("  - quickTypeStatus() - Get current status")
-    log("  - quickTypeReload() - Reload snippets from background")
-    log("  - quickTypeDebugStorage() - Debug storage and token status")
-    log("  - quickTypeClearStorage() - Clear stored tokens")
-    log("  - quickTypeTestLogin() - Test login functionality")
-    log("  - quickTypeTestLogout() - Test logout functionality")
   } catch (error) {
     log("❌ Error initializing QuickType:", error)
   }

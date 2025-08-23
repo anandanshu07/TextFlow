@@ -9,9 +9,9 @@ import {
 
 // Removed Firestore imports - using Express backend instead
 
-// Enhanced logging
+// Enhanced logging - removed console logs
 const log = (message: string, data?: any) => {
-  console.log(`[QuickType Background] ${message}`, data || "")
+  // Console logs removed
 }
 
 // Firebase configuration
@@ -36,15 +36,13 @@ const EXPRESS_SERVER_URL = "https://slash-backend-73zn.onrender.com"
 const getFirebaseIdToken = async (): Promise<string | null> => {
   try {
     if (!auth || !auth.currentUser) {
-      log("❌ No authenticated user found")
       return null
     }
 
     const idToken = await auth.currentUser.getIdToken()
-    log("✅ Firebase ID token retrieved")
+
     return idToken
   } catch (error) {
-    log("❌ Error getting Firebase ID token:", error)
     return null
   }
 }
@@ -78,7 +76,6 @@ const makeApiCall = async (
 
     return await response.json()
   } catch (error) {
-    log(`❌ API call to ${endpoint} failed:`, error)
     throw error
   }
 }
@@ -88,10 +85,7 @@ try {
   auth = getAuth(app)
 
   // Don't set persistence in background script - handle it manually with Chrome storage
-  log("✅ Firebase auth initialized successfully")
-} catch (error) {
-  log("❌ Firebase initialization failed:", error)
-}
+} catch (error) {}
 
 // OAuth token storage keys
 const OAUTH_TOKEN_KEY = "quicktype_oauth_token"
@@ -108,11 +102,7 @@ const storeOAuthToken = async (token: string) => {
       [OAUTH_TOKEN_KEY]: token,
       [TOKEN_EXPIRY_KEY]: expiryTime
     })
-
-    log("✅ OAuth token stored successfully")
-  } catch (error) {
-    log("❌ Error storing OAuth token:", error)
-  }
+  } catch (error) {}
 }
 
 // Retrieve stored OAuth token
@@ -126,14 +116,11 @@ const getStoredOAuthToken = async (): Promise<string | null> => {
     const expiry = result[TOKEN_EXPIRY_KEY]
 
     if (!token || !expiry) {
-      log("ℹ️ No stored OAuth token found")
       return null
     }
 
     // Check if token is expired
     if (Date.now() > expiry) {
-      log("⏰ Stored OAuth token has expired, attempting refresh...")
-
       // Try to get a fresh token without user interaction
       const refreshedToken = await refreshOAuthToken()
       if (refreshedToken) {
@@ -145,10 +132,8 @@ const getStoredOAuthToken = async (): Promise<string | null> => {
       return null
     }
 
-    log("✅ Valid stored OAuth token found")
     return token
   } catch (error) {
-    log("❌ Error retrieving stored OAuth token:", error)
     return null
   }
 }
@@ -157,34 +142,27 @@ const getStoredOAuthToken = async (): Promise<string | null> => {
 const refreshOAuthToken = async (): Promise<string | null> => {
   try {
     if (!chrome.identity) {
-      log("❌ Chrome identity API not available for token refresh")
       return null
     }
-
-    log("🔄 Attempting to refresh OAuth token...")
 
     return new Promise((resolve) => {
       // Try to get a token without user interaction
       chrome.identity.getAuthToken({ interactive: false }, async (token) => {
         if (chrome.runtime.lastError) {
-          log("❌ Token refresh failed:", chrome.runtime.lastError.message)
           resolve(null)
           return
         }
 
         if (!token) {
-          log("❌ No token received during refresh")
           resolve(null)
           return
         }
 
-        log("✅ Token refreshed successfully")
         await storeOAuthToken(token)
         resolve(token)
       })
     })
   } catch (error) {
-    log("❌ Error during token refresh:", error)
     return null
   }
 }
@@ -197,10 +175,7 @@ const clearStoredOAuthToken = async () => {
       TOKEN_EXPIRY_KEY,
       REFRESH_TOKEN_KEY
     ])
-    log("✅ Stored OAuth token cleared")
-  } catch (error) {
-    log("❌ Error clearing stored OAuth token:", error)
-  }
+  } catch (error) {}
 }
 
 // Try to authenticate with stored token
@@ -212,15 +187,11 @@ const tryAuthWithStoredToken = async (): Promise<boolean> => {
       return false
     }
 
-    log("🔄 Attempting authentication with stored token")
-
     const credential = GoogleAuthProvider.credential(null, storedToken)
     await signInWithCredential(auth, credential)
 
-    log("✅ Successfully authenticated with stored token")
     return true
   } catch (error) {
-    log("❌ Failed to authenticate with stored token:", error)
     // Clear invalid token
     await clearStoredOAuthToken()
     return false
@@ -239,7 +210,6 @@ const checkExistingAuth = async (): Promise<boolean> => {
     try {
       // Check current user directly first
       if (auth.currentUser) {
-        log("✅ Existing Firebase auth found:", auth.currentUser.email)
         resolve(true)
         return
       }
@@ -248,7 +218,6 @@ const checkExistingAuth = async (): Promise<boolean> => {
       const unsubscribe = onAuthStateChanged(auth, (user) => {
         unsubscribe() // Immediately unsubscribe after first check
         if (user) {
-          log("✅ Auth state change detected user:", user.email)
           resolve(true)
         } else {
           resolve(false)
@@ -261,7 +230,6 @@ const checkExistingAuth = async (): Promise<boolean> => {
         resolve(false)
       }, 2000)
     } catch (error) {
-      log("❌ Error checking existing auth:", error)
       resolve(false)
     }
   })
@@ -279,8 +247,6 @@ let isLoading = false
 // Load user snippets from Express server with metadata
 const loadUserSnippets = async (userId: string) => {
   try {
-    log("📥 Loading snippets for user:", userId)
-
     const response = await makeApiCall("/api/snippets")
 
     const snippets: Record<string, string> = {}
@@ -306,9 +272,6 @@ const loadUserSnippets = async (userId: string) => {
             usageCount,
             lastUsed
           }
-          log(
-            `✅ Loaded snippet: ${formattedKeyword} -> ${value} (used ${usageCount} times)`
-          )
         }
       })
     }
@@ -316,10 +279,8 @@ const loadUserSnippets = async (userId: string) => {
     // Update global state
     snippetMetadata = metadata
 
-    log(`🎉 Loaded ${Object.keys(snippets).length} snippets with metadata`)
     return snippets
   } catch (error) {
-    log("❌ Error loading snippets:", error)
     return {}
   }
 }
@@ -327,9 +288,6 @@ const loadUserSnippets = async (userId: string) => {
 // Increment usage count for a keyword
 const incrementUsageCount = async (keyword: string) => {
   if (!currentUser || !snippetMetadata[keyword]) {
-    log(
-      "❌ Cannot increment usage count - user not logged in or keyword not found"
-    )
     return
   }
 
@@ -345,10 +303,6 @@ const incrementUsageCount = async (keyword: string) => {
       // Update local metadata
       snippetMetadata[keyword].usageCount += 1
       snippetMetadata[keyword].lastUsed = new Date()
-
-      log(
-        `📈 Usage count incremented for ${keyword}: ${snippetMetadata[keyword].usageCount}`
-      )
 
       // Notify content scripts and popup about usage update
       const usageData = {
@@ -406,8 +360,6 @@ const getSnippetsWithMetadata = () => {
 // Sync user to backend server
 const syncUserToBackend = async (user: any) => {
   try {
-    log("👤 Syncing user to backend:", user.email)
-
     const userData = {
       uid: user.uid,
       email: user.email,
@@ -422,38 +374,22 @@ const syncUserToBackend = async (user: any) => {
     })
 
     if (response.success) {
-      log("✅ User synced to backend successfully")
     } else {
-      log("⚠️ User sync failed:", response.error)
     }
-  } catch (error) {
-    log("❌ Error syncing user to backend:", error)
-  }
+  } catch (error) {}
 }
 
 // Handle authentication state changes
 if (auth) {
   onAuthStateChanged(auth, async (user) => {
-    log("🔄 Auth state changed:", user ? "User logged in" : "User logged out")
-    log(
-      "🔄 User details:",
-      user
-        ? { uid: user.uid, email: user.email, displayName: user.displayName }
-        : "No user"
-    )
-
     currentUser = user
     isLoading = false
 
     if (user) {
-      log("👤 User authenticated:", user.email)
-
       // Sync user to backend first
       await syncUserToBackend(user)
 
       userSnippets = await loadUserSnippets(user.uid)
-      log("📦 Loaded snippets for user:", userSnippets)
-      log("📊 Loaded snippet metadata:", snippetMetadata)
 
       // Notify popup about user state change with metadata
       chrome.runtime
@@ -494,7 +430,6 @@ if (auth) {
         })
       })
     } else {
-      log("🚫 User logged out")
       userSnippets = {}
       snippetMetadata = {}
 
@@ -528,18 +463,15 @@ if (auth) {
     }
   })
 } else {
-  log("⚠️ Auth not available, skipping auth state listener")
 }
 
 // Handle login request
 const handleLogin = async () => {
   if (isLoading) {
-    log("⏳ Login already in progress")
     return { success: false, error: "Login already in progress" }
   }
 
   isLoading = true
-  log("🚀 Starting login process")
 
   try {
     // Check if Firebase auth is properly initialized
@@ -551,7 +483,6 @@ const handleLogin = async () => {
     const hasExistingAuth = await checkExistingAuth()
     if (hasExistingAuth) {
       isLoading = false
-      log("✅ Already authenticated in Firebase")
       return { success: true, alreadyAuthenticated: true }
     }
 
@@ -566,8 +497,6 @@ const handleLogin = async () => {
       throw new Error("Chrome identity API not available")
     }
 
-    log("🔄 Requesting new OAuth token from Chrome Identity...")
-
     return new Promise((resolve) => {
       chrome.identity.getAuthToken({ interactive: true }, async (token) => {
         try {
@@ -579,8 +508,6 @@ const handleLogin = async () => {
             throw new Error("No token received from chrome.identity")
           }
 
-          log("✅ Token received, creating Firebase credential")
-
           // Store the token for future use
           await storeOAuthToken(token)
 
@@ -591,10 +518,8 @@ const handleLogin = async () => {
           const credential = GoogleAuthProvider.credential(null, token)
           await signInWithCredential(auth, credential)
 
-          log("✅ Firebase sign in successful")
           resolve({ success: true, usedStoredToken: false })
         } catch (error) {
-          log("❌ Login failed:", error)
           resolve({ success: false, error: error.message })
         } finally {
           isLoading = false
@@ -603,7 +528,6 @@ const handleLogin = async () => {
     })
   } catch (error) {
     isLoading = false
-    log("❌ Login error:", error)
     return { success: false, error: error.message }
   }
 }
@@ -623,22 +547,16 @@ const handleLogout = async () => {
       try {
         const token = await getStoredOAuthToken()
         if (token) {
-          chrome.identity.removeCachedAuthToken({ token }, () => {
-            log("✅ Cached auth token removed from Chrome Identity")
-          })
+          chrome.identity.removeCachedAuthToken({ token }, () => {})
         }
-      } catch (error) {
-        log("⚠️ Could not remove cached auth token:", error)
-      }
+      } catch (error) {}
     }
 
     // Sign out from Firebase
     await signOut(auth)
 
-    log("✅ Logout successful")
     return { success: true }
   } catch (error) {
-    log("❌ Logout error:", error)
     return { success: false, error: error.message }
   }
 }
@@ -651,7 +569,6 @@ const handleRefreshSnippets = async () => {
 
   try {
     userSnippets = await loadUserSnippets(currentUser.uid)
-    log("✅ Snippets refreshed")
 
     // Notify content scripts about snippet update
     chrome.tabs.query({}, (tabs) => {
@@ -676,7 +593,6 @@ const handleRefreshSnippets = async () => {
       snippetsWithMetadata: getSnippetsWithMetadata()
     }
   } catch (error) {
-    log("❌ Error refreshing snippets:", error)
     return { success: false, error: error.message }
   }
 }
@@ -703,8 +619,6 @@ const saveSnippetToExpressServer = async (keyword: string, value: string) => {
     })
 
     if (response.success) {
-      log(`✅ Snippet saved to Express server: ${keyword} -> ${value}`)
-
       // Refresh snippets from database to ensure consistency
       const refreshedSnippets = await loadUserSnippets(currentUser.uid)
       userSnippets = refreshedSnippets
@@ -737,7 +651,6 @@ const saveSnippetToExpressServer = async (keyword: string, value: string) => {
       }
     }
   } catch (error) {
-    log("❌ Error saving snippet to Express server:", error)
     return { success: false, error: error.message }
   }
 }
@@ -766,8 +679,6 @@ const updateSnippetInExpressServer = async (
     })
 
     if (response.success) {
-      log(`✅ Snippet updated in Express server: ${keyword} -> ${value}`)
-
       // Refresh snippets from database to ensure consistency
       const refreshedSnippets = await loadUserSnippets(currentUser.uid)
       userSnippets = refreshedSnippets
@@ -800,7 +711,6 @@ const updateSnippetInExpressServer = async (
       }
     }
   } catch (error) {
-    log("❌ Error updating snippet in Express server:", error)
     return { success: false, error: error.message }
   }
 }
@@ -827,8 +737,6 @@ const deleteSnippetFromExpressServer = async (keyword: string) => {
     })
 
     if (response.success) {
-      log(`✅ Snippet deleted from Express server: ${keyword}`)
-
       // Refresh snippets from database to ensure consistency
       const refreshedSnippets = await loadUserSnippets(currentUser.uid)
       userSnippets = refreshedSnippets
@@ -858,18 +766,14 @@ const deleteSnippetFromExpressServer = async (keyword: string) => {
       }
     }
   } catch (error) {
-    log("❌ Error deleting snippet from Express server:", error)
     return { success: false, error: error.message }
   }
 }
 
 // Handle message from popup or content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  log("📨 Message received:", message.type)
-
   switch (message.type) {
     case "TEST_BACKGROUND":
-      log("🧪 Background script test received")
       sendResponse({
         success: true,
         message: "Background script is working",
@@ -887,8 +791,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
 
     case "GET_USER":
-      log("👤 GET_USER request - currentUser:", currentUser)
-      log("👤 GET_USER request - userSnippets:", userSnippets)
       sendResponse({
         user: currentUser,
         isLoading,
@@ -928,7 +830,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
 
     case "INCREMENT_USAGE":
-      log("📈 Incrementing usage for keyword:", message.keyword)
       incrementUsageCount(message.keyword)
       sendResponse({ success: true })
       break
@@ -950,7 +851,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       break
 
     case "TEST_BACKEND":
-      log("🧪 Backend connection test received")
       // Test the backend connection
       if (!currentUser) {
         sendResponse({
@@ -961,14 +861,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Make a simple test call to the backend
         makeApiCall("/api/test")
           .then(() => {
-            log("✅ Backend test successful")
             sendResponse({
               success: true,
               message: "Backend is connected and accessible"
             })
           })
           .catch((error) => {
-            log("❌ Backend test failed:", error)
             sendResponse({
               success: false,
               error: `Backend connection failed: ${error.message}`
@@ -978,9 +876,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
 
     case "DEBUG_STORAGE":
-      log("🐛 Debug storage request received")
       chrome.storage.local.get(null, (items) => {
-        log("📦 All stored items:", items)
         sendResponse({
           success: true,
           storedItems: items,
@@ -996,14 +892,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
 
     case "CLEAR_STORAGE":
-      log("🗑️ Clear storage request received")
       clearStoredOAuthToken().then(() => {
         sendResponse({ success: true, message: "Storage cleared successfully" })
       })
       return true
 
     default:
-      log("❓ Unknown message type:", message.type)
       sendResponse({ error: "Unknown message type" })
   }
 })
@@ -1032,36 +926,26 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 })
 
 // Initialize background script with auto-login attempt
-log("🚀 QuickType background script initialized with persistent login")
 
 // Try to auto-login on startup with multiple strategies
 // Use a longer delay for service worker context to ensure everything is ready
 const attemptAutoLogin = async () => {
   try {
     if (!currentUser && !isLoading && auth) {
-      log("🔄 Attempting auto-login with multiple strategies...")
-
       // Strategy 1: Check existing Firebase auth state
       const hasExistingAuth = await checkExistingAuth()
       if (hasExistingAuth) {
-        log("✅ Auto-login successful via existing Firebase auth")
         return
       }
 
       // Strategy 2: Try stored token authentication
       const storedTokenResult = await tryAuthWithStoredToken()
       if (storedTokenResult) {
-        log("✅ Auto-login successful via stored token")
         return
       }
-
-      log("ℹ️ No valid stored credentials for auto-login")
     } else if (!auth) {
-      log("⚠️ Firebase auth not properly initialized, skipping auto-login")
     }
-  } catch (error) {
-    log("❌ Auto-login attempt failed:", error)
-  }
+  } catch (error) {}
 }
 
 // Multiple startup attempts to handle service worker timing issues
@@ -1074,15 +958,13 @@ setInterval(
   async () => {
     try {
       if (currentUser && auth) {
-        log("🔄 Performing periodic token refresh check...")
         const refreshedToken = await refreshOAuthToken()
         if (refreshedToken) {
-          log("✅ Token refreshed successfully during periodic check")
         }
       }
-    } catch (error) {
-      log("❌ Periodic token refresh failed:", error)
-    }
+    } catch (error) {}
   },
   30 * 60 * 1000
 ) // 30 minutes
+
+

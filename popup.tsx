@@ -67,10 +67,7 @@ const IndexPopup = () => {
         const testResponse = await chrome.runtime.sendMessage({
           type: "TEST_BACKGROUND"
         })
-        console.log("Background script test:", testResponse)
-
         const response = await chrome.runtime.sendMessage({ type: "GET_USER" })
-        console.log("User state response:", response)
         setUser(response.user)
         setIsLoading(response.isLoading)
 
@@ -88,7 +85,6 @@ const IndexPopup = () => {
     // Listen for user state changes from background script
     const handleUserStateChange = (message) => {
       if (message.type === "USER_STATE_CHANGED") {
-        console.log("User state changed:", message)
         setUser(message.user)
         setIsLoading(message.isLoading)
 
@@ -133,7 +129,6 @@ const IndexPopup = () => {
         setItems(response.snippetsWithMetadata)
       }
     } catch (error) {
-      console.error("Error loading items:", error)
       alert("Error loading your items. Please try again.")
     } finally {
       setLoading(false)
@@ -377,12 +372,10 @@ const IndexPopup = () => {
     try {
       const response = await chrome.runtime.sendMessage({ type: "LOGIN" })
       if (response.success) {
-        console.log("Login successful, refreshing user state...")
         // Immediately get updated user state
         const userResponse = await chrome.runtime.sendMessage({
           type: "GET_USER"
         })
-        console.log("Updated user state:", userResponse)
         setUser(userResponse.user)
         setIsLoading(userResponse.isLoading)
 
@@ -393,7 +386,6 @@ const IndexPopup = () => {
         alert(`Login failed: ${response.error}`)
       }
     } catch (error) {
-      console.error("Login error:", error)
       alert("Login failed. Please try again.")
     } finally {
       setIsLoading(false)
@@ -413,7 +405,6 @@ const IndexPopup = () => {
         alert(`Logout failed: ${response.error}`)
       }
     } catch (error) {
-      console.error("Logout error:", error)
       alert("Logout failed. Please try again.")
     }
   }
