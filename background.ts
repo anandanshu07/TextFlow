@@ -9,9 +9,13 @@ import {
 
 // Removed Firestore imports - using Express backend instead
 
-// Enhanced logging - removed console logs
+// Enhanced logging for debugging
 const log = (message: string, data?: any) => {
-  // Console logs removed
+  if (data !== undefined) {
+    console.log(`[Slash Auth] ${message}`, data)
+  } else {
+    console.log(`[Slash Auth] ${message}`)
+  }
 }
 
 // Firebase configuration
@@ -30,22 +34,8 @@ let app: any = null
 let auth: any = null
 
 // Express server configuration
-const EXPRESS_SERVER_URL = "https://slash-backend-73zn.onrender.com"
-
-// Helper function to get Firebase ID token
-const getFirebaseIdToken = async (): Promise<string | null> => {
-  try {
-    if (!auth || !auth.currentUser) {
-      return null
-    }
-
-    const idToken = await auth.currentUser.getIdToken()
-
-    return idToken
-  } catch (error) {
-    return null
-  }
-}
+const EXPRESS_SERVER_URL =
+  process.env.PLASMO_PUBLIC_BACKEND_URL || "http://localhost:5000"
 
 // Helper function to make authenticated API calls to Express server
 const makeApiCall = async (
@@ -53,29 +43,53 @@ const makeApiCall = async (
   options: RequestInit = {}
 ): Promise<any> => {
   try {
-    const idToken = await getFirebaseIdToken()
-    if (!idToken) {
-      throw new Error("No valid Firebase ID token available")
+    const accessToken = await getBackendAccessToken()
+    if (!accessToken) {
+      log("ERROR: No access token available for API call")
+      throw new Error("No valid access token available")
     }
 
+    log(`Making API call to ${endpoint}...`)
     const response = await fetch(`${EXPRESS_SERVER_URL}${endpoint}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${idToken}`,
+        Authorization: `Bearer ${accessToken}`,
         ...options.headers
       }
     })
 
+    log(`API call to ${endpoint} responded with status: ${response.status}`)
+
+    // Handle 401 (token expired) - retry with refreshed token
+    if (response.status === 401) {
+      const errorData = await response.text()
+      log(`Got 401 error from ${endpoint}:`, errorData)
+      log("Attempting to refresh token...")
+
+      const refreshed = await refreshBackendToken()
+      if (refreshed) {
+        log("Token refresh successful, retrying API call...")
+        // Retry request with new token
+        return makeApiCall(endpoint, options)
+      }
+      log("Token refresh failed")
+      throw new Error("Authentication failed - please log in again")
+    }
+
     if (!response.ok) {
       const errorData = await response.text()
+      log(`API call to ${endpoint} failed:`, errorData)
       throw new Error(
         `API call failed: ${response.status} ${response.statusText} - ${errorData}`
       )
     }
 
-    return await response.json()
+    const data = await response.json()
+    log(`API call to ${endpoint} successful`, data)
+    return data
   } catch (error) {
+    log(`API call to ${endpoint} threw error:`, error)
     throw error
   }
 }
@@ -87,152 +101,192 @@ try {
   // Don't set persistence in background script - handle it manually with Chrome storage
 } catch (error) {}
 
-// OAuth token storage keys
-const OAUTH_TOKEN_KEY = "quicktype_oauth_token"
-const TOKEN_EXPIRY_KEY = "quicktype_token_expiry"
-const REFRESH_TOKEN_KEY = "quicktype_refresh_token"
+// Backend token storage keys
+const ACCESS_TOKEN_KEY = "slash_access_token"
+const REFRESH_TOKEN_KEY = "slash_refresh_token"
+const TOKEN_EXPIRY_KEY = "slash_token_expiry"
 
-// Store OAuth token with expiry
-const storeOAuthToken = async (token: string) => {
+// Migration flag
+const MIGRATION_FLAG = "auth_migration_v2_complete"
+
+// Store backend tokens
+const storeBackendTokens = async (
+  accessToken: string,
+  refreshToken: string,
+  expiresIn: number
+) => {
   try {
-    // Calculate expiry time (50 minutes from now, tokens usually expire in 1 hour)
-    const expiryTime = Date.now() + 50 * 60 * 1000
+    const expiryTime = Date.now() + expiresIn * 1000
 
     await chrome.storage.local.set({
-      [OAUTH_TOKEN_KEY]: token,
+      [ACCESS_TOKEN_KEY]: accessToken,
+      [REFRESH_TOKEN_KEY]: refreshToken,
       [TOKEN_EXPIRY_KEY]: expiryTime
     })
-  } catch (error) {}
+  } catch (error) {
+    log("Error storing backend tokens:", error)
+  }
 }
 
-// Retrieve stored OAuth token
-const getStoredOAuthToken = async (): Promise<string | null> => {
+// Get backend access token with auto-refresh
+const getBackendAccessToken = async (): Promise<string | null> => {
   try {
     const result = await chrome.storage.local.get([
-      OAUTH_TOKEN_KEY,
+      ACCESS_TOKEN_KEY,
       TOKEN_EXPIRY_KEY
     ])
-    const token = result[OAUTH_TOKEN_KEY]
-    const expiry = result[TOKEN_EXPIRY_KEY]
 
-    if (!token || !expiry) {
+    const accessToken = result[ACCESS_TOKEN_KEY]
+    const expiryTime = result[TOKEN_EXPIRY_KEY]
+
+    // If no token exists, return null
+    if (!accessToken) {
+      log("No access token found in storage")
       return null
     }
 
-    // Check if token is expired
-    if (Date.now() > expiry) {
-      // Try to get a fresh token without user interaction
-      const refreshedToken = await refreshOAuthToken()
-      if (refreshedToken) {
-        return refreshedToken
+    // If no expiry time, token is invalid
+    if (!expiryTime) {
+      log("No expiry time found - token invalid")
+      return null
+    }
+
+    // Check if token expired or about to expire (5-second buffer)
+    if (Date.now() >= (expiryTime - 5000)) {
+      log("Access token expired or expiring soon, refreshing...")
+      const refreshed = await refreshBackendToken()
+      if (!refreshed) {
+        log("Token refresh failed")
+        return null
       }
-
-      // If refresh fails, clear the expired token
-      await clearStoredOAuthToken()
-      return null
+      // Get newly refreshed token
+      const newResult = await chrome.storage.local.get([ACCESS_TOKEN_KEY])
+      log("Token refreshed successfully")
+      return newResult[ACCESS_TOKEN_KEY]
     }
 
-    return token
+    log("Using valid access token from storage")
+    return accessToken
   } catch (error) {
+    log("Error getting backend access token:", error)
     return null
   }
 }
 
-// Refresh OAuth token silently
-const refreshOAuthToken = async (): Promise<string | null> => {
+// Refresh backend tokens using refresh token (with rotation)
+const refreshBackendToken = async (): Promise<boolean> => {
   try {
-    if (!chrome.identity) {
-      return null
-    }
+    log("Starting token refresh...")
+    const result = await chrome.storage.local.get([REFRESH_TOKEN_KEY])
+    const refreshToken = result[REFRESH_TOKEN_KEY]
 
-    return new Promise((resolve) => {
-      // Try to get a token without user interaction
-      chrome.identity.getAuthToken({ interactive: false }, async (token) => {
-        if (chrome.runtime.lastError) {
-          resolve(null)
-          return
-        }
-
-        if (!token) {
-          resolve(null)
-          return
-        }
-
-        await storeOAuthToken(token)
-        resolve(token)
-      })
-    })
-  } catch (error) {
-    return null
-  }
-}
-
-// Clear stored OAuth token
-const clearStoredOAuthToken = async () => {
-  try {
-    await chrome.storage.local.remove([
-      OAUTH_TOKEN_KEY,
-      TOKEN_EXPIRY_KEY,
-      REFRESH_TOKEN_KEY
-    ])
-  } catch (error) {}
-}
-
-// Try to authenticate with stored token
-const tryAuthWithStoredToken = async (): Promise<boolean> => {
-  try {
-    const storedToken = await getStoredOAuthToken()
-
-    if (!storedToken || !auth) {
+    if (!refreshToken) {
+      log("ERROR: No refresh token found in storage")
       return false
     }
 
-    const credential = GoogleAuthProvider.credential(null, storedToken)
-    await signInWithCredential(auth, credential)
+    log("Calling /auth/refresh endpoint...")
+    const response = await fetch(`${EXPRESS_SERVER_URL}/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${refreshToken}`
+      }
+    })
+
+    log(`Refresh endpoint responded with status: ${response.status}`)
+
+    if (!response.ok) {
+      const errorData = await response.text()
+      log("Refresh token failed - response:", errorData)
+
+      // Refresh token invalid/expired - clear storage and require re-login
+      await clearBackendTokens()
+      // Notify UI about logout
+      currentUser = null
+      userSnippets = {}
+      snippetMetadata = {}
+      chrome.runtime
+        .sendMessage({
+          type: "USER_STATE_CHANGED",
+          user: null,
+          isLoading: false,
+          snippets: {},
+          snippetsWithMetadata: []
+        })
+        .catch(() => {})
+      return false
+    }
+
+    const data = await response.json()
+    log("Refresh successful, new tokens received:", data)
+    // { accessToken, refreshToken (new), expiresIn }
+
+    // Store new tokens (refresh token rotated)
+    await storeBackendTokens(data.accessToken, data.refreshToken, data.expiresIn)
+    log("New tokens stored successfully")
 
     return true
   } catch (error) {
-    // Clear invalid token
-    await clearStoredOAuthToken()
+    log("Token refresh failed with exception:", error)
     return false
   }
 }
 
-// Check if user is already authenticated
-const checkExistingAuth = async (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    if (!auth) {
-      resolve(false)
-      return
-    }
+// Clear backend tokens
+const clearBackendTokens = async () => {
+  try {
+    await chrome.storage.local.remove([
+      ACCESS_TOKEN_KEY,
+      REFRESH_TOKEN_KEY,
+      TOKEN_EXPIRY_KEY
+    ])
+  } catch (error) {
+    log("Error clearing backend tokens:", error)
+  }
+}
 
-    // In service worker context, we need to be more careful with auth state
-    try {
-      // Check current user directly first
-      if (auth.currentUser) {
-        resolve(true)
-        return
+// Exchange Firebase ID token for backend tokens
+const exchangeFirebaseTokenForBackendTokens = async (
+  firebaseIdToken: string
+) => {
+  try {
+    log("Exchanging Firebase token for backend tokens...")
+    const response = await fetch(`${EXPRESS_SERVER_URL}/auth/firebase`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${firebaseIdToken}`
       }
+    })
 
-      // Fallback to auth state change listener with shorter timeout
-      const unsubscribe = onAuthStateChanged(auth, (user) => {
-        unsubscribe() // Immediately unsubscribe after first check
-        if (user) {
-          resolve(true)
-        } else {
-          resolve(false)
-        }
-      })
+    log(`Backend responded with status: ${response.status}`)
 
-      // Shorter timeout for service worker context
-      setTimeout(() => {
-        unsubscribe()
-        resolve(false)
-      }, 2000)
-    } catch (error) {
-      resolve(false)
+    if (!response.ok) {
+      const errorData = await response.json()
+      log("Backend error response:", errorData)
+      throw new Error(errorData.error || "Backend authentication failed")
     }
-  })
+
+    const data = await response.json()
+    log("Backend response data:", data)
+    // { accessToken, refreshToken, expiresIn }
+
+    if (!data.accessToken || !data.refreshToken || !data.expiresIn) {
+      log("ERROR: Missing tokens in backend response!", data)
+      throw new Error("Invalid token response from backend")
+    }
+
+    // Store backend tokens
+    log("Storing tokens in chrome.storage.local...")
+    await storeBackendTokens(data.accessToken, data.refreshToken, data.expiresIn)
+    log("Tokens stored successfully")
+
+    return data
+  } catch (error) {
+    log("Token exchange failed:", error)
+    throw new Error(`Token exchange failed: ${error.message}`)
+  }
 }
 
 // Global state
@@ -357,112 +411,62 @@ const getSnippetsWithMetadata = () => {
   return snippetsWithMetadata
 }
 
-// Sync user to backend server
-const syncUserToBackend = async (user: any) => {
+// Firebase onAuthStateChanged is no longer used for state management
+// State is now managed via backend tokens in handleLogin/handleLogout/loadUserData
+
+// Load user data after authentication
+const loadUserData = async () => {
   try {
-    const userData = {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName,
-      photoURL: user.photoURL,
-      lastLoginAt: new Date().toISOString()
+    // Get current user info from backend
+    const response = await makeApiCall("/api/user/me")
+
+    currentUser = {
+      uid: response.user.firebaseUid,
+      email: response.user.email,
+      displayName: response.user.displayName,
+      photoURL: response.user.photoURL
     }
 
-    const response = await makeApiCall("/api/user/sync", {
-      method: "POST",
-      body: JSON.stringify(userData)
+    // Load snippets
+    userSnippets = await loadUserSnippets(currentUser.uid)
+
+    // Broadcast to UI
+    chrome.runtime
+      .sendMessage({
+        type: "USER_STATE_CHANGED",
+        user: currentUser,
+        isLoading: false,
+        snippets: userSnippets,
+        snippetsWithMetadata: getSnippetsWithMetadata()
+      })
+      .catch(() => {})
+
+    // Notify content scripts about user login
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        if (tab.id) {
+          chrome.tabs
+            .sendMessage(tab.id, {
+              type: "USER_LOGIN",
+              user: {
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName,
+                photoURL: currentUser.photoURL
+              },
+              snippets: userSnippets,
+              snippetsWithMetadata: getSnippetsWithMetadata()
+            })
+            .catch(() => {})
+        }
+      })
     })
 
-    if (response.success) {
-    } else {
-    }
-  } catch (error) {}
-}
-
-// Handle authentication state changes
-if (auth) {
-  onAuthStateChanged(auth, async (user) => {
-    currentUser = user
-    isLoading = false
-
-    if (user) {
-      // Sync user to backend first
-      await syncUserToBackend(user)
-
-      userSnippets = await loadUserSnippets(user.uid)
-
-      // Notify popup about user state change with metadata
-      chrome.runtime
-        .sendMessage({
-          type: "USER_STATE_CHANGED",
-          user: {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.displayName
-          },
-          isLoading: false,
-          snippets: userSnippets,
-          snippetsWithMetadata: getSnippetsWithMetadata()
-        })
-        .catch(() => {
-          // Popup might not be open, ignore errors
-        })
-
-      // Notify content scripts about user login
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          if (tab.id) {
-            chrome.tabs
-              .sendMessage(tab.id, {
-                type: "USER_LOGIN",
-                user: {
-                  uid: user.uid,
-                  email: user.email,
-                  displayName: user.displayName
-                },
-                snippets: userSnippets,
-                snippetsWithMetadata: getSnippetsWithMetadata()
-              })
-              .catch(() => {
-                // Tab might not have content script, ignore errors
-              })
-          }
-        })
-      })
-    } else {
-      userSnippets = {}
-      snippetMetadata = {}
-
-      // Notify popup about user state change
-      chrome.runtime
-        .sendMessage({
-          type: "USER_STATE_CHANGED",
-          user: null,
-          isLoading: false,
-          snippets: {},
-          snippetsWithMetadata: []
-        })
-        .catch(() => {
-          // Popup might not be open, ignore errors
-        })
-
-      // Notify content scripts about user logout
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          if (tab.id) {
-            chrome.tabs
-              .sendMessage(tab.id, {
-                type: "USER_LOGOUT"
-              })
-              .catch(() => {
-                // Tab might not have content script, ignore errors
-              })
-          }
-        })
-      })
-    }
-  })
-} else {
+    return true
+  } catch (error) {
+    log("Failed to load user data:", error)
+    return false
+  }
 }
 
 // Handle login request
@@ -479,50 +483,50 @@ const handleLogin = async () => {
       throw new Error("Firebase auth not properly initialized")
     }
 
-    // First, check if we already have an authenticated user in Firebase
-    const hasExistingAuth = await checkExistingAuth()
-    if (hasExistingAuth) {
-      isLoading = false
-      return { success: true, alreadyAuthenticated: true }
-    }
-
-    // Try to authenticate with stored token
-    const storedAuthSuccess = await tryAuthWithStoredToken()
-    if (storedAuthSuccess) {
-      isLoading = false
-      return { success: true, usedStoredToken: true }
-    }
-
     if (!chrome.identity) {
       throw new Error("Chrome identity API not available")
     }
 
     return new Promise((resolve) => {
-      chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+      // Step 1: Get Google OAuth token via Chrome Identity
+      chrome.identity.getAuthToken({ interactive: true }, async (oauthToken) => {
         try {
           if (chrome.runtime.lastError) {
             throw new Error(chrome.runtime.lastError.message)
           }
 
-          if (!token) {
+          if (!oauthToken) {
             throw new Error("No token received from chrome.identity")
           }
-
-          // Store the token for future use
-          await storeOAuthToken(token)
 
           if (!auth) {
             throw new Error("Firebase auth not available during sign in")
           }
 
-          const credential = GoogleAuthProvider.credential(null, token)
+          // Step 2: Sign in to Firebase (ONLY to get ID token)
+          const credential = GoogleAuthProvider.credential(null, oauthToken)
           await signInWithCredential(auth, credential)
 
-          resolve({ success: true, usedStoredToken: false })
-        } catch (error) {
-          resolve({ success: false, error: error.message })
-        } finally {
+          // Step 3: Get Firebase ID token
+          const firebaseIdToken = await auth.currentUser.getIdToken()
+
+          // Step 4: Exchange with backend for backend tokens
+          await exchangeFirebaseTokenForBackendTokens(firebaseIdToken)
+
+          // Step 5: Clean up Firebase session (no longer needed)
+          await signOut(auth)
+
+          // Step 6: Clear Chrome Identity cache
+          chrome.identity.removeCachedAuthToken({ token: oauthToken }, () => {})
+
+          // Step 7: Load user data using backend tokens
+          await loadUserData()
+
           isLoading = false
+          resolve({ success: true })
+        } catch (error) {
+          isLoading = false
+          resolve({ success: false, error: error.message })
         }
       })
     })
@@ -535,25 +539,61 @@ const handleLogin = async () => {
 // Handle logout request
 const handleLogout = async () => {
   try {
-    if (!auth) {
-      throw new Error("Firebase auth not available")
-    }
+    const result = await chrome.storage.local.get([REFRESH_TOKEN_KEY])
+    const refreshToken = result[REFRESH_TOKEN_KEY]
 
-    // Clear stored OAuth token
-    await clearStoredOAuthToken()
-
-    // Remove cached token from Chrome Identity
-    if (chrome.identity && chrome.identity.removeCachedAuthToken) {
+    // Notify backend to revoke refresh token
+    if (refreshToken) {
       try {
-        const token = await getStoredOAuthToken()
-        if (token) {
-          chrome.identity.removeCachedAuthToken({ token }, () => {})
-        }
-      } catch (error) {}
+        await fetch(`${EXPRESS_SERVER_URL}/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${refreshToken}`
+          }
+        })
+      } catch (error) {
+        // Continue with local logout even if backend call fails
+        log("Backend logout failed:", error)
+      }
     }
 
-    // Sign out from Firebase
-    await signOut(auth)
+    // Clear backend tokens from storage
+    await clearBackendTokens()
+
+    // Clear Firebase session (if any)
+    if (auth) {
+      await signOut(auth)
+    }
+
+    // Reset local state
+    currentUser = null
+    userSnippets = {}
+    snippetMetadata = {}
+
+    // Notify popup about logout
+    chrome.runtime
+      .sendMessage({
+        type: "USER_STATE_CHANGED",
+        user: null,
+        isLoading: false,
+        snippets: {},
+        snippetsWithMetadata: []
+      })
+      .catch(() => {})
+
+    // Notify content scripts about logout
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        if (tab.id) {
+          chrome.tabs
+            .sendMessage(tab.id, {
+              type: "USER_LOGOUT"
+            })
+            .catch(() => {})
+        }
+      })
+    })
 
     return { success: true }
   } catch (error) {
@@ -880,7 +920,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           success: true,
           storedItems: items,
-          hasOAuthToken: !!items[OAUTH_TOKEN_KEY],
+          hasAccessToken: !!items[ACCESS_TOKEN_KEY],
+          hasRefreshToken: !!items[REFRESH_TOKEN_KEY],
           tokenExpiry: items[TOKEN_EXPIRY_KEY]
             ? new Date(items[TOKEN_EXPIRY_KEY]).toISOString()
             : null,
@@ -892,7 +933,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
 
     case "CLEAR_STORAGE":
-      clearStoredOAuthToken().then(() => {
+      clearBackendTokens().then(() => {
         sendResponse({ success: true, message: "Storage cleared successfully" })
       })
       return true
@@ -913,7 +954,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           user: {
             uid: currentUser.uid,
             email: currentUser.email,
-            displayName: currentUser.displayName
+            displayName: currentUser.displayName,
+            photoURL: currentUser.photoURL
           },
           snippets: userSnippets,
           snippetsWithMetadata: getSnippetsWithMetadata()
@@ -925,46 +967,66 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 })
 
-// Initialize background script with auto-login attempt
+// Initialize background script with migration and auto-login
 
-// Try to auto-login on startup with multiple strategies
-// Use a longer delay for service worker context to ensure everything is ready
+// Migration logic for extension update
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === "update" || details.reason === "install") {
+    const migrationResult = await chrome.storage.local.get([MIGRATION_FLAG])
+
+    if (!migrationResult[MIGRATION_FLAG]) {
+      log("Running auth migration v2...")
+
+      // Clear old Firebase/OAuth tokens
+      await chrome.storage.local.remove([
+        "quicktype_oauth_token",
+        "quicktype_token_expiry",
+        "quicktype_refresh_token"
+      ])
+
+      // Clear Firebase session
+      if (auth) {
+        await signOut(auth)
+      }
+
+      // Mark migration complete
+      await chrome.storage.local.set({ [MIGRATION_FLAG]: true })
+
+      // Force logout state
+      currentUser = null
+      userSnippets = {}
+      snippetMetadata = {}
+
+      log("Migration complete - users will need to log in again")
+    }
+  }
+})
+
+// Simple auto-login attempt on startup
 const attemptAutoLogin = async () => {
   try {
-    if (!currentUser && !isLoading && auth) {
-      // Strategy 1: Check existing Firebase auth state
-      const hasExistingAuth = await checkExistingAuth()
-      if (hasExistingAuth) {
-        return
-      }
+    // Check if we have backend tokens
+    const result = await chrome.storage.local.get([
+      ACCESS_TOKEN_KEY,
+      REFRESH_TOKEN_KEY
+    ])
 
-      // Strategy 2: Try stored token authentication
-      const storedTokenResult = await tryAuthWithStoredToken()
-      if (storedTokenResult) {
-        return
+    if (result[ACCESS_TOKEN_KEY] && result[REFRESH_TOKEN_KEY]) {
+      // Try to load user data with existing tokens
+      const success = await loadUserData()
+      if (success) {
+        log("Auto-login successful with backend tokens")
+      } else {
+        log("Auto-login failed - tokens may be invalid")
+        await clearBackendTokens()
       }
-    } else if (!auth) {
     }
-  } catch (error) {}
+  } catch (error) {
+    log("Auto-login error:", error)
+  }
 }
 
-// Multiple startup attempts to handle service worker timing issues
+// Single startup attempt after a short delay
 setTimeout(attemptAutoLogin, 1000)
-setTimeout(attemptAutoLogin, 3000)
-setTimeout(attemptAutoLogin, 5000)
-
-// Periodic token refresh check (every 30 minutes)
-setInterval(
-  async () => {
-    try {
-      if (currentUser && auth) {
-        const refreshedToken = await refreshOAuthToken()
-        if (refreshedToken) {
-        }
-      }
-    } catch (error) {}
-  },
-  30 * 60 * 1000
-) // 30 minutes
 
 

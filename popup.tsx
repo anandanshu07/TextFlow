@@ -37,7 +37,7 @@ const IndexPopup = () => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [user, setUser] = useState(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [sortBy, setSortBy] = useState<"recent" | "usage" | "alphabetical">(
     "recent"
   )
@@ -51,13 +51,7 @@ const IndexPopup = () => {
     }
   }, [user])
 
-  // Show login animation when user logs in
-  useEffect(() => {
-    if (user && !isLoading) {
-      setShowLoginAnimation(true)
-      setTimeout(() => setShowLoginAnimation(false), 1000)
-    }
-  }, [user, isLoading])
+  // Animation is now triggered only in the onLogin function
 
   // Get user state from background script
   useEffect(() => {
@@ -99,10 +93,10 @@ const IndexPopup = () => {
           prevItems.map((item) =>
             item.keyword === message.keyword
               ? {
-                  ...item,
-                  usageCount: message.usageCount,
-                  lastUsed: message.lastUsed
-                }
+                ...item,
+                usageCount: message.usageCount,
+                lastUsed: message.lastUsed
+              }
               : item
           )
         )
@@ -382,6 +376,10 @@ const IndexPopup = () => {
         if (userResponse.user && userResponse.snippetsWithMetadata) {
           setItems(userResponse.snippetsWithMetadata)
         }
+
+        // Trigger login animation only on successful login
+        setShowLoginAnimation(true)
+        setTimeout(() => setShowLoginAnimation(false), 1000)
       } else {
         alert(`Login failed: ${response.error}`)
       }
@@ -407,6 +405,18 @@ const IndexPopup = () => {
     } catch (error) {
       alert("Logout failed. Please try again.")
     }
+  }
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="flex h-[550px] w-80 bg-[#0a0a0f] relative overflow-hidden items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 mx-auto border-2 border-[#b6b9be] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-[#b6b9be]/70 font-figtree text-sm">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   if (!user) {
@@ -486,9 +496,23 @@ const IndexPopup = () => {
             {/* Subtle subtitle */}
             <p className="text-[#b6b9be]/50 text-sm font-figtree">
               Your shortcuts are 🔒 end-to-end encrypted. <br /> Yes! we cannot
-              see any data.
+              see your precious data.
             </p>
           </div>
+        </div>
+
+        {/* Footer */}
+        <div className="absolute bottom-4 left-0 right-0 text-center z-10">
+          <p className="text-[#b6b9be]/40 text-xs font-figtree">
+            Made with ❤️ by{" "}
+            <a
+              href="https://itsdivyansh.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#b6b9be]/60 hover:text-[#b6b9be] transition-colors duration-200 underline">
+              deevee
+            </a>
+          </p>
         </div>
       </div>
     )
@@ -517,9 +541,17 @@ const IndexPopup = () => {
       {/* User Header */}
       <div className="absolute top-0 left-0 right-0 h-16 bg-[#0a0a0f]/90 backdrop-blur-sm border-b border-[#b6b9be]/10 flex items-center justify-between px-6 z-20">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-r from-[#b6b9be] to-[#9ca3af] rounded-full flex items-center justify-center shadow-lg shadow-[#b6b9be]/20">
-            <User size={16} className="text-[#0a0a0f]" />
-          </div>
+          {user.photoURL ? (
+            <img
+              src={user.photoURL}
+              alt={user.displayName}
+              className="w-8 h-8 rounded-full shadow-lg shadow-[#b6b9be]/20 object-cover"
+            />
+          ) : (
+            <div className="w-8 h-8 bg-gradient-to-r from-[#b6b9be] to-[#9ca3af] rounded-full flex items-center justify-center shadow-lg shadow-[#b6b9be]/20">
+              <User size={16} className="text-[#0a0a0f]" />
+            </div>
+          )}
           <div>
             <p className="text-sm font-medium text-[#b6b9be] font-figtree">
               {user.displayName}
@@ -618,11 +650,10 @@ const IndexPopup = () => {
               <button
                 key={key}
                 onClick={() => setSortBy(key as any)}
-                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md text-xs font-figtree transition-all duration-200 ${
-                  sortBy === key
-                    ? "bg-[#b6b9be] text-[#0a0a0f]"
-                    : "text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10"
-                }`}>
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-md text-xs font-figtree transition-all duration-200 ${sortBy === key
+                  ? "bg-[#b6b9be] text-[#0a0a0f]"
+                  : "text-[#b6b9be]/60 hover:text-[#b6b9be] hover:bg-[#b6b9be]/10"
+                  }`}>
                 {Icon && <Icon size={12} />}
                 {label}
               </button>
@@ -653,20 +684,19 @@ const IndexPopup = () => {
               </p>
             </div>
           ) : (
-            <div className="p-3 space-y-2">
+            <div className="p-3 space-y-2" style={{ perspective: '1000px' }}>
               {getSortedItems().map((item, index) => (
                 <div
-                  key={item.docId}
+                  key={`${sortBy}-${item.docId}`}
                   className={`
                     group p-2 rounded-xl cursor-pointer transition-all duration-300 border backdrop-blur-sm
-                    ${
-                      selectedItem && selectedItem.docId === item.docId
-                        ? "bg-[#b6b9be]/20 border-[#b6b9be]/30  shadow-[#b6b9be]/10"
-                        : "bg-[#b6b9be]/5 border-[#b6b9be]/10 hover:bg-[#b6b9be]/10 hover:border-[#b6b9be]/20  hover:shadow-[#b6b9be]/5"
+                    ${selectedItem && selectedItem.docId === item.docId
+                      ? "bg-[#b6b9be]/20 border-[#b6b9be]/30  shadow-[#b6b9be]/10"
+                      : "bg-[#b6b9be]/5 border-[#b6b9be]/10 hover:bg-[#b6b9be]/10 hover:border-[#b6b9be]/20  hover:shadow-[#b6b9be]/5"
                     }
                     ${deletingItems.has(item.docId) ? "animate-slide-out-left opacity-0 transform -translate-x-full" : "animate-slide-in-item"}
                   `}
-                  style={{ animationDelay: `${index * 50}ms` }}
+                  style={{ animationDelay: `${index * 30}ms` }}
                   onClick={() => selectItem(item)}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0 relative">
@@ -743,7 +773,7 @@ const IndexPopup = () => {
                         className="flex items-center gap-2 px-6 py-2 bg-[#b6b9be] text-[#0a0a0f] font-medium rounded-xl hover:bg-[#9ca3af] transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-[#b6b9be]/20 disabled:opacity-50 disabled:cursor-not-allowed font-figtree">
                         {saving ? (
                           <>
-                            <div className="w-4 h-4 border-2 border-[#0a0a0f] border-t-transparent rounded-full animate-spin"></div>
+
                             Saving...
                           </>
                         ) : (
@@ -775,7 +805,7 @@ const IndexPopup = () => {
                         onChange={handleKeywordChange}
                         placeholder="/email"
                         disabled={saving}
-                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 text-lg font-mono text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 text-base font-mono text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                       <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
                     </div>
@@ -796,9 +826,9 @@ const IndexPopup = () => {
                         value={value}
                         onChange={(e) => setValue(e.target.value)}
                         placeholder="Enter the text that will replace your keyword..."
-                        rows={8}
+                        rows={4}
                         disabled={saving}
-                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 resize-none text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed font-figtree"
+                        className="w-full px-4 py-3 bg-[#b6b9be]/10 backdrop-blur-sm border border-[#b6b9be]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#b6b9be]/50 focus:border-[#b6b9be]/40 transition-all duration-200 resize-none text-[#b6b9be] placeholder-[#b6b9be]/40 disabled:opacity-50 disabled:cursor-not-allowed font-figtree text-base"
                       />
                       <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#b6b9be]/10 to-[#9ca3af]/10 opacity-0 pointer-events-none transition-opacity duration-200 focus-within:opacity-100"></div>
                     </div>
@@ -842,6 +872,20 @@ const IndexPopup = () => {
           )}
         </div>
       )}
+
+      {/* Footer */}
+      <div className="absolute bottom-3 left-0 right-0 text-center z-10">
+        <p className="text-[#b6b9be]/30 text-xs font-figtree">
+          Made with ❤️ by{" "}
+          <a
+            href="https://itsdivyansh.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#b6b9be]/50 hover:text-[#b6b9be] transition-colors duration-200 underline">
+            deevee
+          </a>
+        </p>
+      </div>
     </div>
   )
 }
