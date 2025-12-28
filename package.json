@@ -2,7 +2,7 @@
   "name": "slash",
   "displayName": "Slash | Quick Type Text Replacement Tool",
   "version": "0.0.1",
-  "description": "Be lazy, instantly insert frequently used text anywhere with smart shortcuts.",
+  "description": "Slash is a modern & secure text replacement tool lets you reuse text instantly — no copy, no retype, no stress.",
   "author": "deevee47",
   "scripts": {
     "dev": "plasmo dev",
@@ -32,7 +32,6 @@
     "typescript": "5.3.3"
   },
   "manifest": {
-    "key": "$CRX_PUBLIC_KEY",
     "host_permissions": [
       "https://*/*"
     ],
