@@ -174,9 +174,10 @@ const getBackendAccessToken = async (): Promise<string | null> => {
 }
 
 // Refresh backend tokens using refresh token (with rotation)
-const refreshBackendToken = async (): Promise<boolean> => {
+const refreshBackendToken = async (retryCount = 0): Promise<boolean> => {
+  const MAX_RETRIES = 2
   try {
-    log("Starting token refresh...")
+    log(`Starting token refresh... (attempt ${retryCount + 1})`)
     const result = await chrome.storage.local.get([REFRESH_TOKEN_KEY])
     const refreshToken = result[REFRESH_TOKEN_KEY]
 
@@ -200,21 +201,35 @@ const refreshBackendToken = async (): Promise<boolean> => {
       const errorData = await response.text()
       log("Refresh token failed - response:", errorData)
 
-      // Refresh token invalid/expired - clear storage and require re-login
-      await clearBackendTokens()
-      // Notify UI about logout
-      currentUser = null
-      userSnippets = {}
-      snippetMetadata = {}
-      chrome.runtime
-        .sendMessage({
-          type: "USER_STATE_CHANGED",
-          user: null,
-          isLoading: false,
-          snippets: {},
-          snippetsWithMetadata: []
-        })
-        .catch(() => {})
+      // Only logout on 401/403 (invalid/expired refresh token)
+      // For other errors (500, network issues), retry
+      if (response.status === 401 || response.status === 403) {
+        log("Refresh token invalid/expired - logging out")
+        await clearBackendTokens()
+        // Notify UI about logout
+        currentUser = null
+        userSnippets = {}
+        snippetMetadata = {}
+        chrome.runtime
+          .sendMessage({
+            type: "USER_STATE_CHANGED",
+            user: null,
+            isLoading: false,
+            snippets: {},
+            snippetsWithMetadata: []
+          })
+          .catch(() => {})
+        return false
+      }
+
+      // Retry for server errors
+      if (retryCount < MAX_RETRIES) {
+        log(`Retrying token refresh (${retryCount + 1}/${MAX_RETRIES})...`)
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+        return refreshBackendToken(retryCount + 1)
+      }
+
+      log("Max retries reached, token refresh failed")
       return false
     }
 
@@ -229,6 +244,15 @@ const refreshBackendToken = async (): Promise<boolean> => {
     return true
   } catch (error) {
     log("Token refresh failed with exception:", error)
+
+    // Retry on network errors
+    if (retryCount < MAX_RETRIES) {
+      log(`Retrying token refresh after network error (${retryCount + 1}/${MAX_RETRIES})...`)
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+      return refreshBackendToken(retryCount + 1)
+    }
+
+    log("Max retries reached after network error")
     return false
   }
 }
@@ -299,7 +323,7 @@ let snippetMetadata: Record<
 let isLoading = false
 
 // Load user snippets from Express server with metadata
-const loadUserSnippets = async (userId: string) => {
+const loadUserSnippets = async (_userId: string) => {
   try {
     const response = await makeApiCall("/api/snippets")
 
@@ -834,7 +858,7 @@ const deleteSnippetFromExpressServer = async (keyword: string) => {
 }
 
 // Handle message from popup or content script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message.type) {
     case "TEST_BACKGROUND":
       sendResponse({
@@ -976,7 +1000,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 // Handle tab updates to notify content scripts
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, _tab) => {
   if (changeInfo.status === "complete" && currentUser) {
     // Small delay to ensure content script is loaded
     setTimeout(() => {
