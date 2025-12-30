@@ -601,9 +601,32 @@ const handleLogout = async () => {
   }
 }
 
+// Ensure user is logged in, attempt auto-login if tokens exist
+const ensureUserLoggedIn = async () => {
+  if (currentUser) {
+    return true
+  }
+
+  // Check if we have tokens in storage and attempt auto-login
+  try {
+    const result = await chrome.storage.local.get([
+      ACCESS_TOKEN_KEY,
+      REFRESH_TOKEN_KEY
+    ])
+    if (result[ACCESS_TOKEN_KEY] && result[REFRESH_TOKEN_KEY]) {
+      const success = await loadUserData()
+      return success
+    }
+  } catch (error) {
+    log("ensureUserLoggedIn error:", error)
+  }
+
+  return false
+}
+
 // Handle snippet refresh request
 const handleRefreshSnippets = async () => {
-  if (!currentUser) {
+  if (!(await ensureUserLoggedIn())) {
     return { success: false, error: "No user logged in" }
   }
 
@@ -639,7 +662,7 @@ const handleRefreshSnippets = async () => {
 
 // Save snippet to Express server
 const saveSnippetToExpressServer = async (keyword: string, value: string) => {
-  if (!currentUser) {
+  if (!(await ensureUserLoggedIn())) {
     return {
       success: false,
       error: "No user logged in"
@@ -701,7 +724,7 @@ const updateSnippetInExpressServer = async (
   keyword: string,
   value: string
 ) => {
-  if (!currentUser) {
+  if (!(await ensureUserLoggedIn())) {
     return {
       success: false,
       error: "No user logged in"
@@ -757,7 +780,7 @@ const updateSnippetInExpressServer = async (
 
 // Delete snippet from Express server
 const deleteSnippetFromExpressServer = async (keyword: string) => {
-  if (!currentUser) {
+  if (!(await ensureUserLoggedIn())) {
     return {
       success: false,
       error: "No user logged in"
@@ -892,27 +915,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case "TEST_BACKEND":
       // Test the backend connection
-      if (!currentUser) {
-        sendResponse({
-          success: false,
-          error: "No user logged in"
-        })
-      } else {
-        // Make a simple test call to the backend
-        makeApiCall("/api/test")
-          .then(() => {
-            sendResponse({
-              success: true,
-              message: "Backend is connected and accessible"
-            })
-          })
-          .catch((error) => {
+      ensureUserLoggedIn()
+        .then((isLoggedIn) => {
+          if (!isLoggedIn) {
             sendResponse({
               success: false,
-              error: `Backend connection failed: ${error.message}`
+              error: "No user logged in"
             })
+          } else {
+            // Make a simple test call to the backend
+            makeApiCall("/api/test")
+              .then(() => {
+                sendResponse({
+                  success: true,
+                  message: "Backend is connected and accessible"
+                })
+              })
+              .catch((error) => {
+                sendResponse({
+                  success: false,
+                  error: `Backend connection failed: ${error.message}`
+                })
+              })
+          }
+        })
+        .catch((error) => {
+          sendResponse({
+            success: false,
+            error: `Login check failed: ${error.message}`
           })
-      }
+        })
       return true
 
     case "DEBUG_STORAGE":
