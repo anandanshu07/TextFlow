@@ -512,47 +512,70 @@ const handleLogin = async () => {
     }
 
     return new Promise((resolve) => {
-      // Step 1: Get Google OAuth token via Chrome Identity
-      chrome.identity.getAuthToken({ interactive: true }, async (oauthToken) => {
-        try {
-          if (chrome.runtime.lastError) {
-            throw new Error(chrome.runtime.lastError.message)
+      // Step 1: Build Google OAuth URL using Firebase web client
+      const clientId = process.env.PLASMO_PUBLIC_FIREBASE_CLIENT_ID
+      const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`
+      const scopes = [
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile"
+      ].join(" ")
+
+      const authUrl =
+        `https://accounts.google.com/o/oauth2/auth` +
+        `?client_id=${encodeURIComponent(clientId)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&response_type=token` +
+        `&scope=${encodeURIComponent(scopes)}`
+
+      chrome.identity.launchWebAuthFlow(
+        { url: authUrl, interactive: true },
+        async (redirectUrl) => {
+          try {
+            if (chrome.runtime.lastError) {
+              throw new Error(chrome.runtime.lastError.message)
+            }
+
+            if (!redirectUrl) {
+              throw new Error("No redirect URL received from OAuth flow")
+            }
+
+            // Step 2: Parse access_token from the redirect hash
+            const hash = new URL(redirectUrl).hash.substring(1)
+            const params = new URLSearchParams(hash)
+            const oauthToken = params.get("access_token")
+
+            if (!oauthToken) {
+              throw new Error("No access token found in redirect URL")
+            }
+
+            if (!auth) {
+              throw new Error("Firebase auth not available during sign in")
+            }
+
+            // Step 3: Sign in to Firebase (ONLY to get ID token)
+            const credential = GoogleAuthProvider.credential(null, oauthToken)
+            await signInWithCredential(auth, credential)
+
+            // Step 4: Get Firebase ID token
+            const firebaseIdToken = await auth.currentUser.getIdToken()
+
+            // Step 5: Exchange with backend for backend tokens
+            await exchangeFirebaseTokenForBackendTokens(firebaseIdToken)
+
+            // Step 6: Clean up Firebase session (no longer needed)
+            await signOut(auth)
+
+            // Step 7: Load user data using backend tokens
+            await loadUserData()
+
+            isLoading = false
+            resolve({ success: true })
+          } catch (error) {
+            isLoading = false
+            resolve({ success: false, error: error.message })
           }
-
-          if (!oauthToken) {
-            throw new Error("No token received from chrome.identity")
-          }
-
-          if (!auth) {
-            throw new Error("Firebase auth not available during sign in")
-          }
-
-          // Step 2: Sign in to Firebase (ONLY to get ID token)
-          const credential = GoogleAuthProvider.credential(null, oauthToken)
-          await signInWithCredential(auth, credential)
-
-          // Step 3: Get Firebase ID token
-          const firebaseIdToken = await auth.currentUser.getIdToken()
-
-          // Step 4: Exchange with backend for backend tokens
-          await exchangeFirebaseTokenForBackendTokens(firebaseIdToken)
-
-          // Step 5: Clean up Firebase session (no longer needed)
-          await signOut(auth)
-
-          // Step 6: Clear Chrome Identity cache
-          chrome.identity.removeCachedAuthToken({ token: oauthToken }, () => {})
-
-          // Step 7: Load user data using backend tokens
-          await loadUserData()
-
-          isLoading = false
-          resolve({ success: true })
-        } catch (error) {
-          isLoading = false
-          resolve({ success: false, error: error.message })
         }
-      })
+      )
     })
   } catch (error) {
     isLoading = false

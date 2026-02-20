@@ -1,7 +1,7 @@
 {
   "name": "slash",
   "displayName": "Slash | Quick Type Text Replacement Tool",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Slash is a modern & secure text replacement tool lets you reuse text instantly — no copy, no retype, no stress.",
   "author": "deevee47",
   "scripts": {
@@ -22,7 +22,7 @@
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "4.1.1",
     "@types/chrome": "0.0.258",
-    "@types/node": "20.11.5",
+    "@types/node": "^20.11.5",
     "@types/react": "18.2.48",
     "@types/react-dom": "18.2.18",
     "autoprefixer": "^10.4.21",
@@ -38,13 +38,6 @@
     "permissions": [
       "identity",
       "storage"
-    ],
-    "oauth2": {
-      "client_id": "$PLASMO_PUBLIC_FIREBASE_CLIENT_ID",
-      "scopes": [
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile"
-      ]
-    }
+    ]
   }
 }
