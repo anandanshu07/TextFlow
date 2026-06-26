@@ -163,6 +163,22 @@ This project is inspired by the open-source **Slash** project and has been exten
 
 ---
 
+## Credits
+
+This project is based on the open-source **Slash** project originally created by **Divyansh Vishwakarma (deevee47)**.
+
+I customized and extended the project by:
+- Rebranding the extension as TextFlow
+- Redesigning the UI
+- Modifying the authentication flow
+- Improving backend integration
+- Updating documentation and project structure
+
+Original project:
+https://github.com/deevee47/slash
+
+---
+
 ## Author
 
 **Anand Anshu**
